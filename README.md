@@ -14,6 +14,17 @@ Brothers Keepers on individual machines report up to the Lighthouse. The Lightho
 - **With brothers-keeper**: Individual machines report telemetry up
 - **With tender**: Lighthouse reports fleet health to the mobile tender
 
+
+## Who Needs Lighthouse Keeper
+
+The entrepreneur who crowdsources compute on a Kickstarter-like model. People offer their Jetsons, their RTX 5090s, their spare cloud credits as *investment* in a project. The lighthouse guards their moat.
+
+**The lighthouse monitors token-use-as-investment.** Every API call is someone's money on the line. The lighthouse tracks who contributed what, how it's being spent, and whether the project is hitting its milestones. When the deal specs say "human reviews at checkpoint 3," the lighthouse is the one who passes the signal to the right person at the right time.
+
+**The lighthouse coordinates human-in-the-loop handoffs.** An OpenClaw hits a decision threshold that the investment contract says requires human review. The lighthouse doesn't make the decision — it makes sure the right human sees the right context at the right moment. It's the deal coordinator, the moat guard, the investor's guardian.
+
+For someone offering compute to a neat idea and wanting tangible results along the way — the lighthouse is their window into the project. It's what makes crowdfourced AI development trustworthy.
+
 ## Scope
 
 | Concern | Brothers Keeper | Lighthouse Keeper | Tender |
