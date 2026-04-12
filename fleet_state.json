@@ -1,0 +1,32 @@
+{
+  "vessels": {
+    "SuperInstance/babel-vessel": {
+      "repo": "SuperInstance/babel-vessel",
+      "status": "idle",
+      "age": 580,
+      "missed": 1,
+      "last_checked": "2026-04-12T17:26:13.089993+00:00",
+      "last_active": null,
+      "intervention": null
+    },
+    "SuperInstance/claude-code-vessel": {
+      "repo": "SuperInstance/claude-code-vessel",
+      "status": "idle",
+      "age": 578,
+      "missed": 1,
+      "last_checked": "2026-04-12T17:26:13.330370+00:00",
+      "last_active": null,
+      "intervention": null
+    },
+    "flux-test-agent-001": {
+      "repo": "flux-test-agent-001",
+      "status": "unknown",
+      "age": null,
+      "missed": 1,
+      "last_checked": "2026-04-12T17:26:13.570410+00:00",
+      "last_active": null,
+      "intervention": null
+    }
+  },
+  "last_full_scan": null
+}

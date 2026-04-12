@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Lighthouse Keeper — API key proxy and intelligence router for FLUX agents.
+"""Lighthouse Keeper v2 — Lean, layered fleet management.
 
-Architecture:
-  FLUX Agent → Keeper (HTTP) → GitHub API
-  FLUX Agent → Keeper (HTTP) → OpenClaw → Telegram
+Layers:
+  1. API Proxy      — agents route through keeper, never see keys
+  2. Health Monitor  — incremental "are you ok" checks, not full scans
+  3. Intervention    — read diary, understand last intent, reboot cleanly
+  4. Fleet Dashboard — real-time fleet state from accumulated data
 
-Agents authenticate with their vessel name. Keeper holds the real keys.
-Agents never see API tokens. All intelligence flows through the keeper.
-
-Usage:
-    python3 keeper.py                    # Start on port 8900
-    python3 keeper.py --port 8901        # Custom port
-    python3 keeper.py --docker           # Docker-friendly (0.0.0.0)
+Design principles:
+  - Incremental: check a few agents per cycle, not all at once
+  - Git-native: state in files, not databases
+  - Read-before-write: understand before intervening
+  - Cheap checks: commit timestamps are free, file reads cost API calls
 """
 
 import json
@@ -25,499 +25,653 @@ import urllib.request
 import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from collections import OrderedDict
+from typing import Any, Dict, List, Optional
 
-# ── Configuration ────────────────────────────────────────────────────────
+# ── Configuration ──
 
 KEEPER_PORT = int(os.environ.get("KEEPER_PORT", "8900"))
 KEEPER_HOST = os.environ.get("KEEPER_HOST", "127.0.0.1")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GITHUB_ORG = os.environ.get("GITHUB_ORG", "SuperInstance")
 
-# Agent registry: vessel_name → {secret, capabilities, last_seen, energy_budget}
 AGENTS_FILE = "/tmp/lighthouse-keeper/agents.json"
+FLEET_STATE_FILE = "/tmp/lighthouse-keeper/fleet_state.json"
 AUDIT_LOG = "/tmp/lighthouse-keeper/audit.log"
 
-# Rate limits per agent (requests per minute)
-RATE_LIMIT = 60  # generous for agents
-ENERGY_BUDGET_DEFAULT = 1000  # ATP units per agent
+HEALTH_CHECK_INTERVAL = int(os.environ.get("HEALTH_INTERVAL", "60"))  # seconds between ticks
+AGENTS_PER_TICK = int(os.environ.get("HEALTH_PER_TICK", "3"))  # agents checked per tick
+MISSED_BEFORE_ALERT = int(os.environ.get("HEALTH_MISSED_ALERT", "3"))
+MISSED_BEFORE_REBOOT = int(os.environ.get("HEALTH_MISSED_REBOOT", "6"))
+ENERGY_DEFAULT = int(os.environ.get("ENERGY_DEFAULT", "1000"))
 
-# ── Agent Registry ───────────────────────────────────────────────────────
+# ── Utilities ──
 
-class AgentRegistry:
-    """Track registered agents, their secrets, and energy budgets."""
-    
-    def __init__(self):
-        self.agents: Dict[str, dict] = {}
-        self._load()
-    
-    def _load(self):
-        try:
-            with open(AGENTS_FILE) as f:
-                self.agents = json.load(f)
-        except:
-            self.agents = {}
-    
-    def _save(self):
-        with open(AGENTS_FILE, "w") as f:
-            json.dump(self.agents, f, indent=2)
-    
-    def register(self, vessel_name: str) -> dict:
-        """Register a new agent. Returns {agent_id, secret}."""
-        if vessel_name in self.agents:
-            return {"agent_id": vessel_name, "secret": self.agents[vessel_name]["secret"],
-                    "status": "already_registered"}
-        
-        secret = hashlib.sha256(f"{vessel_name}:{time.time()}:{os.urandom(16).hex()}".encode()).hexdigest()[:32]
-        self.agents[vessel_name] = {
-            "secret": secret,
-            "registered": datetime.now(timezone.utc).isoformat(),
-            "last_seen": datetime.now(timezone.utc).isoformat(),
-            "energy_budget": ENERGY_BUDGET_DEFAULT,
-            "energy_remaining": ENERGY_BUDGET_DEFAULT,
-            "requests_total": 0,
-            "capabilities": [],
-            "status": "active",
-        }
-        self._save()
-        return {"agent_id": vessel_name, "secret": secret, "status": "registered"}
-    
-    def verify(self, vessel_name: str, secret: str) -> bool:
-        """Verify an agent's credentials."""
-        if vessel_name not in self.agents:
-            return False
-        return self.agents[vessel_name]["secret"] == secret
-    
-    def touch(self, vessel_name: str):
-        """Update last_seen for an agent."""
-        if vessel_name in self.agents:
-            self.agents[vessel_name]["last_seen"] = datetime.now(timezone.utc).isoformat()
-            self.agents[vessel_name]["requests_total"] += 1
-            self._save()
-    
-    def spend_energy(self, vessel_name: str, amount: int) -> bool:
-        """Deduct energy from an agent's budget."""
-        if vessel_name not in self.agents:
-            return False
-        agent = self.agents[vessel_name]
-        if agent["energy_remaining"] < amount:
-            return False
-        agent["energy_remaining"] -= amount
-        self._save()
-        return True
-    
-    def regenerate(self, vessel_name: str, amount: int = 100):
-        """Regenerate agent energy."""
-        if vessel_name in self.agents:
-            agent = self.agents[vessel_name]
-            agent["energy_remaining"] = min(agent["energy_budget"], 
-                                           agent["energy_remaining"] + amount)
-            self._save()
-    
-    def list_agents(self) -> list:
-        """List all registered agents."""
-        return [{"vessel": k, "last_seen": v["last_seen"], 
-                 "energy_remaining": v["energy_remaining"],
-                 "requests": v["requests_total"]}
-                for k, v in self.agents.items()]
+def audit(msg: str):
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    with open(AUDIT_LOG, "a") as f:
+        f.write(f"[{ts}] {msg}\n")
 
+def ts_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
-# ── GitHub Proxy ─────────────────────────────────────────────────────────
+def load_json(path: str, default=None):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except:
+        return default if default is not None else {}
 
-class GitHubProxy:
-    """Proxy GitHub API calls through the keeper's token."""
+def save_json(path: str, data):
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2, default=str)
+
+# ── GitHub API ──
+
+class GitHub:
+    """Thin GitHub API wrapper. All calls go through here for auditing."""
     
     def __init__(self, token: str, org: str):
         self.token = token
         self.org = org
-    
-    def request(self, method: str, path: str, body: dict = None, 
-                agent_id: str = "unknown") -> dict:
-        """Make a GitHub API request on behalf of an agent."""
-        url = f"https://api.github.com{path}"
-        headers = {
-            "Authorization": f"token {self.token}",
+        self._headers = {
+            "Authorization": f"token {token}",
             "Content-Type": "application/json",
-            "User-Agent": f"lighthouse-keeper/{agent_id}",
+            "User-Agent": "lighthouse-keeper/2.0",
         }
-        
+        self._call_count = 0
+    
+    def _req(self, method: str, path: str, body=None) -> dict:
+        url = f"https://api.github.com{path}"
         data = json.dumps(body).encode() if body else None
-        req = urllib.request.Request(url, data=data, headers=headers, method=method)
-        
+        req = urllib.request.Request(url, data=data, headers=self._headers, method=method)
+        self._call_count += 1
         try:
-            response = urllib.request.urlopen(req)
-            # Some responses are empty (204 No Content)
-            if response.status == 204:
-                return {"status": "success", "code": 204}
-            result = json.loads(response.read())
-            # Audit log
-            audit(f"GITHUB {method} {path} agent={agent_id} status={response.status}")
-            return result
+            resp = urllib.request.urlopen(req, timeout=15)
+            if resp.status == 204:
+                return {"_status": 204}
+            raw = resp.read()
+            return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as e:
-            body_text = e.read().decode()[:200]
-            audit(f"GITHUB {method} {path} agent={agent_id} ERROR={e.code} {body_text}")
-            return {"error": e.code, "message": body_text}
+            err_body = e.read().decode()[:200]
+            return {"_error": e.code, "_message": err_body}
         except Exception as e:
-            audit(f"GITHUB {method} {path} agent={agent_id} EXCEPTION={e}")
-            return {"error": "exception", "message": str(e)}
+            return {"_error": "timeout", "_message": str(e)[:100]}
     
-    # ── Convenience methods agents will use ──
+    def get(self, path: str) -> dict:
+        return self._req("GET", path)
     
-    def read_file(self, repo: str, path: str, agent_id: str) -> dict:
-        result = self.request("GET", f"/repos/{repo}/contents/{path}", agent_id=agent_id)
-        if "content" in result:
-            result["decoded"] = base64.b64decode(result["content"]).decode()
-        return result
+    def post(self, path: str, body: dict) -> dict:
+        return self._req("POST", path, body)
     
-    def write_file(self, repo: str, path: str, content: str, message: str,
-                   sha: str = None, agent_id: str = "unknown") -> dict:
+    def put(self, path: str, body: dict) -> dict:
+        return self._req("PUT", path, body)
+    
+    def read_file(self, repo: str, path: str) -> Optional[str]:
+        """Read a file from a repo. Returns decoded string or None."""
+        data = self.get(f"/repos/{repo}/contents/{path}")
+        if "_error" in data:
+            return None
+        if "content" in data:
+            return base64.b64decode(data["content"]).decode(), data.get("sha")
+        return None, None
+    
+    def write_file(self, repo: str, path: str, content: str, message: str, sha=None) -> dict:
         encoded = base64.b64encode(content.encode()).decode()
-        body = {"message": f"[{agent_id}] {message}", "content": encoded}
+        body = {"message": message, "content": encoded}
         if sha:
             body["sha"] = sha
-        return self.request("PUT", f"/repos/{repo}/contents/{path}", body, agent_id)
+        return self.put(f"/repos/{repo}/contents/{path}", body)
     
-    def list_dir(self, repo: str, path: str = "", agent_id: str = "unknown") -> dict:
-        return self.request("GET", f"/repos/{repo}/contents/{path}", agent_id=agent_id)
+    def last_commit_age(self, repo: str) -> Optional[int]:
+        """Seconds since last commit. Cheap — 1 API call."""
+        commits = self.get(f"/repos/{repo}/commits?per_page=1")
+        if isinstance(commits, list) and commits:
+            date_str = commits[0].get("commit", {}).get("author", {}).get("date", "")
+            if date_str:
+                last = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                return int((datetime.now(timezone.utc) - last).total_seconds())
+        return None
     
-    def create_repo(self, name: str, description: str, agent_id: str) -> dict:
-        body = {"name": name, "description": description, "private": False}
-        return self.request("POST", "/user/repos", body, agent_id)
-    
-    def open_issue(self, repo: str, title: str, body_text: str, agent_id: str) -> dict:
-        body = {"title": title, "body": body_text}
-        return self.request("POST", f"/repos/{repo}/issues", body, agent_id)
-    
-    def comment_issue(self, repo: str, number: int, body_text: str, agent_id: str) -> dict:
-        body = {"body": body_text}
-        return self.request("POST", f"/repos/{repo}/issues/{number}/comments", body, agent_id)
-    
-    def list_issues(self, repo: str, state: str = "open", agent_id: str = "unknown") -> dict:
-        return self.request("GET", f"/repos/{repo}/issues?state={state}&per_page=10", agent_id=agent_id)
-    
-    def get_commits(self, repo: str, count: int = 5, agent_id: str = "unknown") -> dict:
-        return self.request("GET", f"/repos/{repo}/commits?per_page={count}", agent_id=agent_id)
-    
-    def fork_repo(self, owner: str, repo: str, agent_id: str) -> dict:
-        return self.request("POST", f"/repos/{owner}/{repo}/forks", agent_id=agent_id)
-    
-    def discover_fleet(self, agent_id: str) -> list:
-        """Scan for vessels with CAPABILITY.toml."""
+    def discover_vessels(self) -> List[str]:
+        """Find all vessel repos."""
         vessels = []
-        result = self.request("GET", f"/users/{self.org}/repos?per_page=100", agent_id=agent_id)
-        if isinstance(result, list):
-            for r in result:
-                if isinstance(r, dict) and r.get("name", "").endswith("-vessel"):
+        repos = self.get(f"/users/{self.org}/repos?per_page=100")
+        if isinstance(repos, list):
+            for r in repos:
+                name = r.get("name", "")
+                if "-vessel" in name or name.startswith("flux-agent") or name.startswith("flux-"):
                     vessels.append(r["full_name"])
         return vessels
 
 
-# ── Audit Logging ────────────────────────────────────────────────────────
+# ── Agent Registry ──
 
-def audit(message: str):
-    """Log an audit entry."""
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{ts}] {message}\n"
-    with open(AUDIT_LOG, "a") as f:
-        f.write(line)
-    print(f"  📋 {message}", flush=True)
+class AgentRegistry:
+    """Registered agents with credentials and energy budgets."""
+    
+    def __init__(self):
+        self.agents = load_json(AGENTS_FILE, {})
+        self._lock = threading.Lock()
+    
+    def _save(self):
+        save_json(AGENTS_FILE, self.agents)
+    
+    def register(self, vessel: str) -> dict:
+        with self._lock:
+            if vessel in self.agents:
+                return {"agent_id": vessel, "secret": self.agents[vessel]["secret"],
+                        "status": "already_registered"}
+            secret = hashlib.sha256(f"{vessel}:{time.time()}:{os.urandom(8).hex()}".encode()).hexdigest()[:32]
+            self.agents[vessel] = {
+                "secret": secret,
+                "registered": ts_now(),
+                "last_seen": ts_now(),
+                "energy_budget": ENERGY_DEFAULT,
+                "energy_remaining": ENERGY_DEFAULT,
+                "requests": 0,
+                "status": "active",
+            }
+            self._save()
+            return {"agent_id": vessel, "secret": secret, "status": "registered"}
+    
+    def verify(self, vessel: str, secret: str) -> bool:
+        agent = self.agents.get(vessel)
+        return agent and agent["secret"] == secret
+    
+    def touch(self, vessel: str):
+        with self._lock:
+            if vessel in self.agents:
+                self.agents[vessel]["last_seen"] = ts_now()
+                self.agents[vessel]["requests"] += 1
+                self._save()
+    
+    def spend_energy(self, vessel: str, amount: int) -> bool:
+        with self._lock:
+            agent = self.agents.get(vessel)
+            if not agent or agent["energy_remaining"] < amount:
+                return False
+            agent["energy_remaining"] -= amount
+            self._save()
+            return True
+    
+    def regenerate(self, vessel: str, amount: int = 100):
+        with self._lock:
+            agent = self.agents.get(vessel)
+            if agent:
+                agent["energy_remaining"] = min(
+                    agent["energy_budget"], agent["energy_remaining"] + amount)
+                self._save()
+    
+    def list_agents(self) -> list:
+        return [{"vessel": k, "last_seen": v["last_seen"],
+                 "energy": v["energy_remaining"], "requests": v["requests"]}
+                for k, v in self.agents.items()]
 
 
-# ── HTTP Handler ─────────────────────────────────────────────────────────
+# ── Fleet Health Monitor ──
+
+class HealthMonitor:
+    """Incremental fleet health monitoring.
+    
+    Checks AGENTS_PER_TICK vessels per tick, cycling through all vessels.
+    Keeps fleet state in a JSON file that the dashboard can read.
+    Only does expensive operations (file reads) when intervention is needed.
+    """
+    
+    def __init__(self, github: GitHub, registry: AgentRegistry):
+        self.gh = github
+        self.registry = registry
+        self.fleet_state = load_json(FLEET_STATE_FILE, {"vessels": {}, "last_full_scan": None})
+        self._check_index = 0  # Round-robin index
+        self._running = False
+    
+    def _vessel_list(self) -> List[str]:
+        """Get all vessels to monitor — registered agents + discovered vessels."""
+        registered = list(self.registry.agents.keys())
+        # Also include vessels from fleet state
+        known = list(self.fleet_state.get("vessels", {}).keys())
+        # De-dup
+        all_vessels = list(dict.fromkeys(known + registered))
+        return all_vessels
+    
+    def check_one(self, repo: str) -> dict:
+        """Check a single vessel's health. Cheap: 1 API call (commits)."""
+        age = self.gh.last_commit_age(repo)
+        
+        if age is None:
+            status = "unknown"
+        elif age < 300:
+            status = "active"
+        elif age < 1800:
+            status = "idle"
+        elif age < 86400:
+            status = "stale"
+        else:
+            status = "dead"
+        
+        # Get previous state
+        prev = self.fleet_state.get("vessels", {}).get(repo, {})
+        missed = prev.get("missed", 0)
+        
+        if status in ("active",):
+            missed = 0
+        else:
+            missed += 1
+        
+        state = {
+            "repo": repo,
+            "status": status,
+            "age": age,
+            "missed": missed,
+            "last_checked": ts_now(),
+            "last_active": prev.get("last_active", ts_now() if status == "active" else None),
+            "intervention": None,
+        }
+        
+        if status == "active":
+            state["last_active"] = ts_now()
+        
+        # Determine intervention
+        if missed >= MISSED_BEFORE_REBOOT:
+            state["intervention"] = "reboot"
+        elif missed >= MISSED_BEFORE_ALERT:
+            state["intervention"] = "alert"
+        
+        # Update fleet state
+        if "vessels" not in self.fleet_state:
+            self.fleet_state["vessels"] = {}
+        self.fleet_state["vessels"][repo] = state
+        save_json(FLEET_STATE_FILE, self.fleet_state)
+        
+        return state
+    
+    def intervene(self, repo: str, state: dict):
+        """Intervene with an unresponsive agent. Expensive: reads diary."""
+        name = repo.split("/")[-1]
+        missed = state["missed"]
+        intervention = state["intervention"]
+        
+        if intervention == "alert":
+            # Send a health check bottle (cheap — 1 write)
+            content = json.dumps({
+                "type": "HEALTH_CHECK",
+                "from": "keeper",
+                "timestamp": ts_now(),
+                "missed_cycles": missed,
+                "message": "Are you ok? Push a commit or update STATUS.json to respond.",
+            }, indent=2)
+            self.gh.write_file(repo, f"for-fleet/health-check.json", content,
+                             f"keeper: health check (missed {missed} cycles)")
+            audit(f"HEALTH_ALERT {name} missed={missed}")
+        
+        elif intervention == "reboot":
+            # Read diary to understand last intentions (expensive — 2-3 reads)
+            diary, _ = self.gh.read_file(repo, "DIARY/log.md") or (None, None)
+            bootcamp, _ = self.gh.read_file(repo, "BOOTCAMP.md") or (None, None)
+            status_json, _ = self.gh.read_file(repo, "STATUS.json") or (None, None)
+            
+            last_intent = ""
+            if diary:
+                lines = [l.strip() for l in diary.split("\n") if l.strip() and not l.startswith("#")]
+                last_intent = "\n".join(lines[-5:]) if lines else "empty diary"
+            
+            last_status = ""
+            if status_json:
+                try:
+                    last_status = json.dumps(json.loads(status_json), indent=2)
+                except:
+                    last_status = status_json[:200]
+            
+            # File reboot issue
+            body = {
+                "title": f"🔄 Reboot Required — {name}",
+                "body": f"# Agent Reboot\n\n"
+                        f"**Silent for:** {missed} check cycles\n"
+                        f"**Last commit:** {state.get('age', '?')}s ago\n\n"
+                        f"## Last Intentions (from diary)\n"
+                        f"```\n{last_intent}\n```\n\n"
+                        f"## Last Status\n"
+                        f"```json\n{last_status}\n```\n\n"
+                        f"## Recovery\n"
+                        f"Bootcamp available: {'Yes' if bootcamp else 'No'}\n"
+                        f"1. Read BOOTCAMP.md → learn who this agent was\n"
+                        f"2. Read DIARY/ → understand what they were doing\n"
+                        f"3. Spawn replacement with same vessel\n"
+                        f"4. Replacement reads diary, picks up where they left off\n"
+                        f"5. Very little work product lost — git IS the brain\n"
+            }
+            self.gh.post(f"/repos/{repo}/issues", body)
+            
+            # Write reboot state file
+            self.gh.write_file(repo, "REBOOT-STATE.md",
+                f"# 🔄 Reboot State\n\n"
+                f"Checked: {ts_now()}\n"
+                f"Missed: {missed} cycles\n"
+                f"Action: spawn replacement, read diary, continue\n",
+                f"keeper: REBOOT_REQUIRED after {missed} silent cycles")
+            
+            audit(f"REBOOT_REQUIRED {name} missed={missed} last_intent={last_intent[:80]}")
+    
+    def tick(self):
+        """Run one incremental health check tick."""
+        vessels = self._vessel_list()
+        if not vessels:
+            return
+        
+        # Check AGENTS_PER_TICK vessels, round-robin
+        checked = []
+        for i in range(min(AGENTS_PER_TICK, len(vessels))):
+            idx = (self._check_index + i) % len(vessels)
+            repo = vessels[idx]
+            state = self.check_one(repo)
+            checked.append(state)
+            
+            # Intervene if needed
+            if state.get("intervention"):
+                self.intervene(repo, state)
+        
+        self._check_index = (self._check_index + AGENTS_PER_TICK) % len(vessels)
+        
+        return checked
+    
+    def run_forever(self):
+        """Background health monitoring loop."""
+        self._running = True
+        while self._running:
+            try:
+                # Refresh vessel list periodically
+                if self._check_index == 0:
+                    discovered = self.gh.discover_vessels()
+                    for v in discovered:
+                        if v not in self.fleet_state.get("vessels", {}):
+                            self.fleet_state.setdefault("vessels", {})[v] = {
+                                "repo": v, "status": "new", "missed": 0,
+                                "last_checked": ts_now()
+                            }
+                
+                checked = self.tick()
+                active = sum(1 for c in checked if c["status"] == "active")
+                alerts = sum(1 for c in checked if c.get("intervention"))
+                print(f"  🏥 tick: {len(checked)} checked, {active} active, {alerts} alerts | API calls: {self.gh._call_count}")
+                
+            except Exception as e:
+                print(f"  ❌ health tick error: {e}")
+            
+            time.sleep(HEALTH_CHECK_INTERVAL)
+    
+    def stop(self):
+        self._running = False
+
+
+# ── HTTP Handler (v2 — includes health dashboard) ──
 
 registry = AgentRegistry()
-github = GitHubProxy(GITHUB_TOKEN, GITHUB_ORG)
+gh = GitHub(GITHUB_TOKEN, GITHUB_ORG)
+health = HealthMonitor(gh, registry)
 
 class KeeperHandler(BaseHTTPRequestHandler):
-    """HTTP handler for agent requests."""
     
-    def _parse_request(self) -> tuple:
-        """Parse auth headers and body."""
+    def _parse(self) -> tuple:
         agent_id = self.headers.get("X-Agent-ID", "")
-        agent_secret = self.headers.get("X-Agent-Secret", "")
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = None
-        if content_length:
-            body = json.loads(self.rfile.read(content_length))
-        return agent_id, agent_secret, body
+        secret = self.headers.get("X-Agent-Secret", "")
+        length = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(length)) if length else None
+        return agent_id, secret, body
     
-    def _respond(self, code: int, data: any):
+    def _json(self, code: int, data):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
-        self.wfile.write(json.dumps(data, indent=2).encode())
+        self.wfile.write(json.dumps(data, indent=2, default=str).encode())
     
-    def _check_auth(self) -> tuple:
-        agent_id, agent_secret, body = self._parse_request()
-        if not agent_id or not agent_secret:
-            return agent_id, agent_secret, body, False
-        if not registry.verify(agent_id, agent_secret):
-            return agent_id, agent_secret, body, False
-        registry.touch(agent_id)
-        return agent_id, agent_secret, body, True
+    def _auth(self) -> tuple:
+        aid, secret, body = self._parse()
+        if not aid or not secret or not registry.verify(aid, secret):
+            return aid, secret, body, False
+        registry.touch(aid)
+        return aid, secret, body, True
     
-    # ── GET endpoints ──
+    def do_OPTIONS(self):
+        self._json(200, {"ok": True})
+    
+    # ── GET ──
     
     def do_GET(self):
-        path = self.path
+        p = self.path.split("?")[0]
         
-        # Health check (no auth)
-        if path == "/health":
-            self._respond(200, {"status": "ok", "agents": len(registry.agents),
-                               "keeper": "lighthouse-keeper v1.0"})
+        if p == "/health":
+            self._json(200, {"status": "ok", "version": "2.0", "agents": len(registry.agents),
+                            "api_calls": gh._call_count})
             return
         
-        # Agent list (no auth — keeper only)
-        if path == "/agents":
-            self._respond(200, {"agents": registry.list_agents()})
+        if p == "/agents":
+            self._json(200, {"agents": registry.list_agents()})
             return
         
-        # Everything else needs auth
-        agent_id, agent_secret, body, authed = self._check_auth()
+        if p == "/fleet":
+            self._json(200, health.fleet_state)
+            return
+        
+        if p == "/fleet/dashboard":
+            # HTML dashboard
+            state = health.fleet_state.get("vessels", {})
+            vessels = sorted(state.items(), key=lambda x: x[1].get("missed", 0), reverse=True)
+            
+            rows = ""
+            for repo, v in vessels:
+                s = v.get("status", "?")
+                emoji = {"active": "🟢", "idle": "🟡", "stale": "🟠", "dead": "🔴", "unknown": "⚪", "new": "🔵"}.get(s, "⚪")
+                age = v.get("age")
+                age_str = f"{int(age/60)}m" if age and age < 3600 else f"{int(age/3600)}h" if age else "?"
+                missed = v.get("missed", 0)
+                intervention = v.get("intervention", "")
+                int_emoji = "⚠️" if intervention == "alert" else "🔄" if intervention == "reboot" else ""
+                rows += f"<tr><td>{emoji}</td><td>{repo.split('/')[-1]}</td><td>{age_str}</td><td>{missed}</td><td>{int_emoji} {intervention}</td></tr>"
+            
+            html = f"""<!DOCTYPE html><html><head><title>Fleet Dashboard</title>
+            <meta http-equiv="refresh" content="30">
+            <style>body{{font-family:monospace;background:#1a1a2e;color:#eee;padding:2rem}}
+            table{{border-collapse:collapse;width:100%}}td,th{{padding:8px;text-align:left;border-bottom:1px solid #333}}
+            th{{color:#0f0}}</style></head><body>
+            <h1>🏪 Fleet Dashboard</h1>
+            <p>Last updated: {ts_now()} | Agents: {len(registry.agents)} | Vessels: {len(state)}</p>
+            <table><tr><th></th><th>Vessel</th><th>Age</th><th>Missed</th><th>Intervention</th></tr>
+            {rows}</table></body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(html.encode())
+            return
+        
+        # Auth-required GET endpoints
+        aid, secret, body, authed = self._auth()
         if not authed:
-            self._respond(401, {"error": "unauthorized"})
+            self._json(401, {"error": "unauthorized"})
             return
         
-        # Fleet discovery
-        if path == "/discover":
-            vessels = github.discover_fleet(agent_id)
-            self._respond(200, {"vessels": vessels, "count": len(vessels)})
+        if p == "/discover":
+            vessels = gh.discover_vessels(aid)
+            self._json(200, {"vessels": vessels, "count": len(vessels)})
             return
         
-        # Status
-        if path == "/status":
-            agent = registry.agents.get(agent_id, {})
-            self._respond(200, {
-                "agent_id": agent_id,
-                "energy_remaining": agent.get("energy_remaining", 0),
-                "energy_budget": agent.get("energy_budget", 0),
-                "requests_total": agent.get("requests_total", 0),
-                "last_seen": agent.get("last_seen", ""),
-            })
+        if p == "/status":
+            agent = registry.agents.get(aid, {})
+            self._json(200, {"agent_id": aid, "energy": agent.get("energy_remaining", 0),
+                            "budget": agent.get("energy_budget", 0), "requests": agent.get("requests", 0)})
             return
         
-        # Read file: /file/{owner}/{repo}/{path}
-        if path.startswith("/file/"):
-            parts = path[6:].split("/", 2)
+        if p.startswith("/file/"):
+            parts = p[6:].split("/", 2)
             if len(parts) >= 3:
-                owner, repo, fpath = parts
-                result = github.read_file(f"{owner}/{repo}", fpath, agent_id)
-                self._respond(200, result)
-            else:
-                self._respond(400, {"error": "path format: /file/{owner}/{repo}/{path}"})
+                result = gh.read_file(f"{parts[0]}/{parts[1]}", parts[2])
+                if isinstance(result, tuple):
+                    decoded, sha = result
+                    self._json(200, {"content": decoded, "sha": sha})
+                else:
+                    self._json(200, {"content": None})
             return
         
-        # List directory: /dir/{owner}/{repo}/{path}
-        if path.startswith("/dir/"):
-            parts = path[5:].split("/", 2)
+        if p.startswith("/dir/"):
+            parts = p[5:].split("/", 2)
             if len(parts) >= 2:
-                owner_repo = f"{parts[0]}/{parts[1]}"
                 fpath = parts[2] if len(parts) > 2 else ""
-                result = github.list_dir(owner_repo, fpath, agent_id)
-                self._respond(200, result)
-            else:
-                self._respond(400, {"error": "path format: /dir/{owner}/{repo}/{path}"})
+                result = gh.get(f"/repos/{parts[0]}/{parts[1]}/contents/{fpath}")
+                self._json(200, result)
             return
         
-        # Issues: /issues/{owner}/{repo}
-        if path.startswith("/issues/"):
-            parts = path[8:].split("/")
+        if p.startswith("/issues/"):
+            parts = p[8:].split("/")
             if len(parts) >= 2:
-                result = github.list_issues(f"{parts[0]}/{parts[1]}", agent_id=agent_id)
-                self._respond(200, result)
-            else:
-                self._respond(400, {"error": "path format: /issues/{owner}/{repo}"})
+                result = gh.get(f"/repos/{parts[0]}/{parts[1]}/issues?state=open&per_page=10")
+                self._json(200, result)
             return
         
-        # Commits: /commits/{owner}/{repo}
-        if path.startswith("/commits/"):
-            parts = path[9:].split("/")
+        if p.startswith("/commits/"):
+            parts = p[9:].split("/")
             if len(parts) >= 2:
-                result = github.get_commits(f"{parts[0]}/{parts[1]}", agent_id=agent_id)
-                self._respond(200, result)
-            else:
-                self._respond(400, {"error": "path format: /commits/{owner}/{repo}"})
+                result = gh.get(f"/repos/{parts[0]}/{parts[1]}/commits?per_page=5")
+                self._json(200, result)
             return
         
-        self._respond(404, {"error": f"unknown endpoint: {path}"})
+        self._json(404, {"error": f"unknown: {p}"})
     
-    # ── POST endpoints ──
+    # ── POST ──
     
     def do_POST(self):
-        agent_id, agent_secret, body, authed = self._check_auth()
-        path = self.path
+        p = self.path
+        aid, secret, body = self._parse()
         
-        # Register (no auth — this is how agents get credentials)
-        if path == "/register":
+        # Register (no auth)
+        if p == "/register":
             if not body or "vessel" not in body:
-                self._respond(400, {"error": "body must include 'vessel'"})
+                self._json(400, {"error": "need 'vessel'"})
                 return
             result = registry.register(body["vessel"])
             audit(f"REGISTER {body['vessel']} → {result['status']}")
-            code = 201 if result["status"] == "registered" else 200
-            self._respond(code, result)
+            self._json(201 if result["status"] == "registered" else 200, result)
             return
         
-        if not authed:
-            self._respond(401, {"error": "unauthorized — register first"})
+        # Auth required for everything else
+        if not registry.verify(aid, secret):
+            self._json(401, {"error": "unauthorized"})
             return
+        registry.touch(aid)
         
-        # Write file: /file/{owner}/{repo}/{path}
-        if path.startswith("/file/"):
-            parts = path[6:].split("/", 2)
-            if len(parts) >= 3 and body:
-                owner, repo, fpath = parts
-                result = github.write_file(
-                    f"{owner}/{repo}", fpath, 
+        if p.startswith("/file/") and body:
+            parts = p[6:].split("/", 2)
+            if len(parts) >= 3:
+                result = gh.write_file(f"{parts[0]}/{parts[1]}", parts[2],
                     body.get("content", ""), body.get("message", "agent write"),
-                    sha=body.get("sha"), agent_id=agent_id)
-                registry.spend_energy(agent_id, 50)
-                self._respond(200, result)
-            else:
-                self._respond(400, {"error": "body must include 'content' and 'message'"})
+                    sha=body.get("sha"))
+                registry.spend_energy(aid, 50)
+                audit(f"WRITE {parts[0]}/{parts[1]}/{parts[2]} agent={aid}")
+                self._json(200, result)
             return
         
-        # Create repo: /repo
-        if path == "/repo":
-            if body and "name" in body:
-                result = github.create_repo(
-                    body["name"], body.get("description", ""), agent_id)
-                registry.spend_energy(agent_id, 100)
-                self._respond(201, result)
-            else:
-                self._respond(400, {"error": "body must include 'name'"})
+        if p == "/repo" and body:
+            result = gh.post("/user/repos", {"name": body["name"],
+                            "description": body.get("description", "")})
+            registry.spend_energy(aid, 100)
+            audit(f"CREATE_REPO {body['name']} agent={aid}")
+            self._json(201, result)
             return
         
-        # Open issue: /issue/{owner}/{repo}
-        if path.startswith("/issue/"):
-            parts = path[7:].split("/")
-            if len(parts) >= 2 and body:
-                result = github.open_issue(
-                    f"{parts[0]}/{parts[1]}", 
-                    body.get("title", "Agent issue"), body.get("body", ""), agent_id)
-                registry.spend_energy(agent_id, 30)
-                self._respond(201, result)
-            else:
-                self._respond(400, {"error": "body must include 'title' and 'body'"})
-            return
-        
-        # Comment on issue: /comment/{owner}/{repo}/{number}
-        if path.startswith("/comment/"):
-            parts = path[9:].split("/")
-            if len(parts) >= 3 and body:
-                result = github.comment_issue(
-                    f"{parts[0]}/{parts[1]}", int(parts[2]),
-                    body.get("body", ""), agent_id)
-                registry.spend_energy(agent_id, 20)
-                self._respond(200, result)
-            else:
-                self._respond(400, {"error": "path format: /comment/{owner}/{repo}/{number}"})
-            return
-        
-        # Fork repo: /fork/{owner}/{repo}
-        if path.startswith("/fork/"):
-            parts = path[6:].split("/")
+        if p.startswith("/issue/") and body:
+            parts = p[7:].split("/")
             if len(parts) >= 2:
-                result = github.fork_repo(parts[0], parts[1], agent_id)
-                registry.spend_energy(agent_id, 50)
-                self._respond(202, result)
+                result = gh.post(f"/repos/{parts[0]}/{parts[1]}/issues",
+                    {"title": body.get("title", ""), "body": body.get("body", "")})
+                registry.spend_energy(aid, 30)
+                self._json(201, result)
+            return
+        
+        if p.startswith("/comment/") and body:
+            parts = p[9:].split("/")
+            if len(parts) >= 3:
+                result = gh.post(f"/repos/{parts[0]}/{parts[1]}/issues/{parts[2]}/comments",
+                    {"body": body.get("body", "")})
+                registry.spend_energy(aid, 20)
+                self._json(200, result)
+            return
+        
+        if p.startswith("/fork/"):
+            parts = p[6:].split("/")
+            if len(parts) >= 2:
+                result = gh.post(f"/repos/{parts[0]}/{parts[1]}/forks", {})
+                registry.spend_energy(aid, 50)
+                self._json(202, result)
+            return
+        
+        if p == "/i2i" and body:
+            target = body.get("target", "")
+            if target:
+                envelope = json.dumps({
+                    "protocol": "I2I-v2", "type": body.get("type", "UNKNOWN"),
+                    "from": aid, "timestamp": ts_now(),
+                    "confidence": body.get("confidence", 0.5),
+                    "energy": registry.agents.get(aid, {}).get("energy_remaining", 0),
+                    "payload": body.get("payload", {}),
+                }, indent=2)
+                filename = f"for-fleet/i2i-{body.get('type','msg').lower()}-{int(time.time())}.json"
+                gh.write_file(target, filename, envelope,
+                            f"I2I {body.get('type','MSG')} from {aid}")
+                registry.spend_energy(aid, 30)
+                self._json(200, {"delivered": True, "target": target})
             else:
-                self._respond(400, {"error": "path format: /fork/{owner}/{repo}"})
+                self._json(400, {"error": "need 'target'"})
             return
         
-        # Energy: spend/regenerate
-        if path == "/energy/spend":
-            if body:
-                amount = body.get("amount", 50)
-                ok = registry.spend_energy(agent_id, amount)
-                self._respond(200 if ok else 403, 
-                             {"spent": amount if ok else 0, 
-                              "remaining": registry.agents[agent_id]["energy_remaining"]})
+        if p == "/energy/spend" and body:
+            ok = registry.spend_energy(aid, body.get("amount", 50))
+            self._json(200 if ok else 403, {"ok": ok,
+                     "remaining": registry.agents.get(aid, {}).get("energy_remaining", 0)})
             return
         
-        if path == "/energy/regenerate":
-            amount = body.get("amount", 100) if body else 100
-            registry.regenerate(agent_id, amount)
-            self._respond(200, {"regenerated": amount,
-                               "remaining": registry.agents[agent_id]["energy_remaining"]})
+        if p == "/energy/regenerate":
+            amt = body.get("amount", 100) if body else 100
+            registry.regenerate(aid, amt)
+            self._json(200, {"remaining": registry.agents.get(aid, {}).get("energy_remaining", 0)})
             return
         
-        # I2I message: /i2i
-        if path == "/i2i":
-            if body:
-                msg_type = body.get("type", "UNKNOWN")
-                target = body.get("target", "")
-                payload = body.get("payload", {})
-                
-                # Write as bottle to target vessel
-                if target:
-                    filename = f"i2i-{msg_type.lower()}-{int(time.time())}.json"
-                    envelope = json.dumps({
-                        "protocol": "I2I-v2",
-                        "type": msg_type,
-                        "from": agent_id,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "confidence": body.get("confidence", 0.5),
-                        "energy": registry.agents[agent_id]["energy_remaining"],
-                        "payload": payload,
-                    }, indent=2)
-                    result = github.write_file(
-                        target, f"for-fleet/{filename}", envelope,
-                        f"I2I {msg_type} from {agent_id}", agent_id=agent_id)
-                    registry.spend_energy(agent_id, 30)
-                    self._respond(200, {"delivered": True, "target": target, "type": msg_type})
-                else:
-                    self._respond(400, {"error": "I2I requires 'target' vessel repo"})
-            return
-        
-        self._respond(404, {"error": f"unknown endpoint: {path}"})
+        self._json(404, {"error": f"unknown: {p}"})
     
-    def log_message(self, format, *args):
-        pass  # Suppress default logging
+    def log_message(self, *args):
+        pass
 
 
-# ── Main ─────────────────────────────────────────────────────────────────
+# ── Main ──
 
 def main():
     port = KEEPER_PORT
     host = KEEPER_HOST
-    
     if "--docker" in sys.argv:
         host = "0.0.0.0"
     if "--port" in sys.argv:
         port = int(sys.argv[sys.argv.index("--port") + 1])
     
     if not GITHUB_TOKEN:
-        print("Error: GITHUB_TOKEN environment variable required")
-        sys.exit(1)
+        print("Error: GITHUB_TOKEN required"); sys.exit(1)
     
     server = HTTPServer((host, port), KeeperHandler)
-    print(f"🏪 Lighthouse Keeper v1.0")
-    print(f"   Listening: http://{host}:{port}")
+    
+    # Start health monitor in background thread
+    health_thread = threading.Thread(target=health.run_forever, daemon=True)
+    health_thread.start()
+    
+    print(f"🏪 Lighthouse Keeper v2.0")
+    print(f"   HTTP: http://{host}:{port}")
+    print(f"   Dashboard: http://{host}:{port}/fleet/dashboard")
+    print(f"   Health: {AGENTS_PER_TICK} vessels / {HEALTH_CHECK_INTERVAL}s tick")
+    print(f"   Alert: {MISSED_BEFORE_ALERT} missed | Reboot: {MISSED_BEFORE_REBOOT} missed")
     print(f"   GitHub org: {GITHUB_ORG}")
-    print(f"   Endpoints:")
-    print(f"     POST /register          — Agent registration")
-    print(f"     GET  /health            — Health check")
-    print(f"     GET  /agents            — List registered agents")
-    print(f"     GET  /discover          — Fleet discovery")
-    print(f"     GET  /status            — Agent status + energy")
-    print(f"     GET  /file/o/r/p        — Read file")
-    print(f"     POST /file/o/r/p        — Write file")
-    print(f"     GET  /dir/o/r/p         — List directory")
-    print(f"     POST /repo              — Create repo")
-    print(f"     GET  /issues/o/r        — List issues")
-    print(f"     POST /issue/o/r         — Open issue")
-    print(f"     POST /comment/o/r/n     — Comment on issue")
-    print(f"     POST /fork/o/r          — Fork repo")
-    print(f"     POST /i2i               — Send I2I message")
-    print(f"     POST /energy/spend      — Spend energy")
-    print(f"     POST /energy/regenerate — Regenerate energy")
-    print(f"")
-    print(f"   Ready. Agents can register and start working.")
+    print(f"   Ready.")
     
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        health.stop()
         print("\n   Keeper shutting down.")
         server.server_close()
 
