@@ -2,19 +2,19 @@
   "vessels": {
     "SuperInstance/babel-vessel": {
       "repo": "SuperInstance/babel-vessel",
-      "status": "idle",
-      "age": 1287,
-      "missed": 8,
-      "last_checked": "2026-04-12T18:12:37.775274+00:00",
+      "status": "stale",
+      "age": 18658,
+      "missed": 76,
+      "last_checked": "2026-04-12T23:02:08.469242+00:00",
       "last_active": "2026-04-12T17:54:20.284462+00:00",
       "intervention": "reboot"
     },
     "SuperInstance/claude-code-vessel": {
       "repo": "SuperInstance/claude-code-vessel",
-      "status": "idle",
-      "age": 1288,
-      "missed": 8,
-      "last_checked": "2026-04-12T18:12:39.672154+00:00",
+      "status": "stale",
+      "age": 18659,
+      "missed": 76,
+      "last_checked": "2026-04-12T23:02:10.425730+00:00",
       "last_active": "2026-04-12T17:55:20.651399+00:00",
       "intervention": "reboot"
     },
@@ -22,8 +22,8 @@
       "repo": "flux-test-agent-001",
       "status": "unknown",
       "age": null,
-      "missed": 19,
-      "last_checked": "2026-04-12T18:12:41.614567+00:00",
+      "missed": 86,
+      "last_checked": "2026-04-12T22:58:54.156485+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -31,8 +31,8 @@
       "repo": "flux-keeper-test",
       "status": "unknown",
       "age": null,
-      "missed": 13,
-      "last_checked": "2026-04-12T18:06:48.165924+00:00",
+      "missed": 81,
+      "last_checked": "2026-04-12T22:58:55.675096+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -40,8 +40,8 @@
       "repo": "flux-c8ecd3",
       "status": "unknown",
       "age": null,
-      "missed": 13,
-      "last_checked": "2026-04-12T18:06:49.072878+00:00",
+      "missed": 81,
+      "last_checked": "2026-04-12T22:58:57.202356+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -49,8 +49,8 @@
       "repo": "flux-test-keeper-boot",
       "status": "unknown",
       "age": null,
-      "missed": 13,
-      "last_checked": "2026-04-12T18:07:50.002849+00:00",
+      "missed": 81,
+      "last_checked": "2026-04-12T22:59:58.771674+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -58,8 +58,8 @@
       "repo": "flux-via-keeper",
       "status": "unknown",
       "age": null,
-      "missed": 13,
-      "last_checked": "2026-04-12T18:07:51.044558+00:00",
+      "missed": 81,
+      "last_checked": "2026-04-12T23:00:00.100354+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -67,8 +67,8 @@
       "repo": "test-direct",
       "status": "unknown",
       "age": null,
-      "missed": 13,
-      "last_checked": "2026-04-12T18:07:51.946565+00:00",
+      "missed": 81,
+      "last_checked": "2026-04-12T23:00:01.422554+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -76,8 +76,8 @@
       "repo": "debug-test",
       "status": "unknown",
       "age": null,
-      "missed": 13,
-      "last_checked": "2026-04-12T18:08:52.978340+00:00",
+      "missed": 81,
+      "last_checked": "2026-04-12T23:01:02.909787+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -85,8 +85,8 @@
       "repo": "flux-challenge-6068",
       "status": "unknown",
       "age": null,
-      "missed": 6,
-      "last_checked": "2026-04-12T18:08:53.914117+00:00",
+      "missed": 74,
+      "last_checked": "2026-04-12T23:01:04.368676+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -94,10 +94,19 @@
       "repo": "flux-baton-test",
       "status": "unknown",
       "age": null,
-      "missed": 3,
-      "last_checked": "2026-04-12T18:08:55.025261+00:00",
+      "missed": 71,
+      "last_checked": "2026-04-12T23:01:05.746990+00:00",
       "last_active": null,
-      "intervention": "alert"
+      "intervention": "reboot"
+    },
+    "flux-chronometer": {
+      "repo": "flux-chronometer",
+      "status": "unknown",
+      "age": null,
+      "missed": 60,
+      "last_checked": "2026-04-12T23:02:07.137528+00:00",
+      "last_active": null,
+      "intervention": "reboot"
     }
   },
   "last_full_scan": null

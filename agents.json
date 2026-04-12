@@ -86,5 +86,14 @@
     "energy_remaining": 40,
     "requests": 50,
     "status": "active"
+  },
+  "flux-chronometer": {
+    "secret": "d6af85452992b274806a7613727e57af",
+    "registered": "2026-04-12T18:45:23.143373+00:00",
+    "last_seen": "2026-04-12T18:53:10.258764+00:00",
+    "energy_budget": 1000,
+    "energy_remaining": 670,
+    "requests": 6,
+    "status": "active"
   }
 }
