@@ -1,0 +1,12 @@
+{
+  "flux-test-agent-001": {
+    "secret": "31b3391a10dbc5dd399cc86254b8fe32",
+    "registered": "2026-04-12T17:08:22.328413+00:00",
+    "last_seen": "2026-04-12T17:08:23.422175+00:00",
+    "energy_budget": 1000,
+    "energy_remaining": 970,
+    "requests_total": 4,
+    "capabilities": [],
+    "status": "active"
+  }
+}

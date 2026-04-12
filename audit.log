@@ -1,0 +1,4 @@
+[2026-04-12 17:08:22] REGISTER flux-test-agent-001 → registered
+[2026-04-12 17:08:23] GITHUB GET /users/SuperInstance/repos?per_page=100 agent=flux-test-agent-001 status=200
+[2026-04-12 17:08:23] GITHUB GET /repos/SuperInstance/oracle1-vessel/contents/CHARTER.md agent=flux-test-agent-001 status=200
+[2026-04-12 17:08:24] GITHUB PUT /repos/SuperInstance/oracle1-vessel/contents/for-fleet/i2i-discover-1776013703.json agent=flux-test-agent-001 status=201
