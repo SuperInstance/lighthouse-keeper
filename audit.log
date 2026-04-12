@@ -2,3 +2,14 @@
 [2026-04-12 17:08:23] GITHUB GET /users/SuperInstance/repos?per_page=100 agent=flux-test-agent-001 status=200
 [2026-04-12 17:08:23] GITHUB GET /repos/SuperInstance/oracle1-vessel/contents/CHARTER.md agent=flux-test-agent-001 status=200
 [2026-04-12 17:08:24] GITHUB PUT /repos/SuperInstance/oracle1-vessel/contents/for-fleet/i2i-discover-1776013703.json agent=flux-test-agent-001 status=201
+[2026-04-12 17:10:10] REGISTER flux-keeper-test → registered
+[2026-04-12 17:11:21] REGISTER flux-c8ecd3 → registered
+[2026-04-12 17:11:34] REGISTER flux-test-keeper-boot → registered
+[2026-04-12 17:11:55] REGISTER flux-via-keeper → registered
+[2026-04-12 17:12:03] REGISTER test-direct → registered
+[2026-04-12 17:12:13] REGISTER debug-test → registered
+[2026-04-12 17:12:37] REGISTER flux-via-keeper → already_registered
+[2026-04-12 17:12:38] GITHUB POST /user/repos agent=flux-via-keeper status=201
+[2026-04-12 17:12:38] GITHUB GET /users/SuperInstance/repos?per_page=100 agent=flux-via-keeper status=200
+[2026-04-12 17:12:39] GITHUB GET /repos/SuperInstance/oracle1-vessel/contents/for-fleet/WELCOME-OPUS.md agent=flux-via-keeper status=200
+[2026-04-12 17:12:39] GITHUB PUT /repos/SuperInstance/oracle1-vessel/contents/for-fleet/i2i-discover-1776013959.json agent=flux-via-keeper status=201

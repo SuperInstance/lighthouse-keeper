@@ -8,5 +8,65 @@
     "requests_total": 4,
     "capabilities": [],
     "status": "active"
+  },
+  "flux-keeper-test": {
+    "secret": "57f91f6e41108dc7f7102bd028de0363",
+    "registered": "2026-04-12T17:10:10.406708+00:00",
+    "last_seen": "2026-04-12T17:10:10.406723+00:00",
+    "energy_budget": 1000,
+    "energy_remaining": 1000,
+    "requests_total": 0,
+    "capabilities": [],
+    "status": "active"
+  },
+  "flux-c8ecd3": {
+    "secret": "2020143d7d960f9d91ad8f6e4c51ad5e",
+    "registered": "2026-04-12T17:11:21.210961+00:00",
+    "last_seen": "2026-04-12T17:11:21.210973+00:00",
+    "energy_budget": 1000,
+    "energy_remaining": 1000,
+    "requests_total": 0,
+    "capabilities": [],
+    "status": "active"
+  },
+  "flux-test-keeper-boot": {
+    "secret": "da0f82e2a8d8dd0e61af3e082e128913",
+    "registered": "2026-04-12T17:11:34.238606+00:00",
+    "last_seen": "2026-04-12T17:11:34.238656+00:00",
+    "energy_budget": 1000,
+    "energy_remaining": 1000,
+    "requests_total": 0,
+    "capabilities": [],
+    "status": "active"
+  },
+  "flux-via-keeper": {
+    "secret": "d0ba18a47d6475f410aadc1928766be0",
+    "registered": "2026-04-12T17:11:55.631726+00:00",
+    "last_seen": "2026-04-12T17:12:39.680912+00:00",
+    "energy_budget": 1000,
+    "energy_remaining": 870,
+    "requests_total": 5,
+    "capabilities": [],
+    "status": "active"
+  },
+  "test-direct": {
+    "secret": "fadd858414b4618632f7c24e87574150",
+    "registered": "2026-04-12T17:12:03.857738+00:00",
+    "last_seen": "2026-04-12T17:12:03.857749+00:00",
+    "energy_budget": 1000,
+    "energy_remaining": 1000,
+    "requests_total": 0,
+    "capabilities": [],
+    "status": "active"
+  },
+  "debug-test": {
+    "secret": "1ea48c52233f0a5937759ed361139239",
+    "registered": "2026-04-12T17:12:13.634881+00:00",
+    "last_seen": "2026-04-12T17:12:13.634893+00:00",
+    "energy_budget": 1000,
+    "energy_remaining": 1000,
+    "requests_total": 0,
+    "capabilities": [],
+    "status": "active"
   }
 }
