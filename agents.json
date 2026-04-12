@@ -68,5 +68,14 @@
     "requests_total": 0,
     "capabilities": [],
     "status": "active"
+  },
+  "flux-challenge-6068": {
+    "secret": "501b2fea92d68352ab3daeee20f92b92",
+    "registered": "2026-04-12T17:47:48.645034+00:00",
+    "last_seen": "2026-04-12T17:47:48.646537+00:00",
+    "energy_budget": 1000,
+    "energy_remaining": 1000,
+    "requests": 1,
+    "status": "active"
   }
 }
