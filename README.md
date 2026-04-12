@@ -75,3 +75,35 @@ The lighthouse doesn't chase the ships. It doesn't sail. It stands on the rocks 
 In a data center full of brothers-keepers — each watching their own machine, their own agent, their own little piece of the coast — the lighthouse keeper sees the whole coastline. When one brother reports RAM pressure and another reports network latency and a third reports GPU thermal throttling, the lighthouse is the one who connects the dots: "The cooling system is failing in rack 14." None of the brothers could see that alone.
 
 The lighthouse keeper is system-centric. The brothers are hardware-centric. Together they cover ground neither could cover alone.
+
+## Captain's Log Integration
+
+The keeper now integrates with the [Captain's Log Academy](https://github.com/Lucineer/captains-log-academy):
+
+### 3-Phase Log Pipeline
+1. **Phase 1 (Raw Dump)**: Agent diary entries → unfiltered transcription
+2. **Phase 2 (Reasoner's Lens)**: Score against 7-element rubric → SKIP or curated signal
+3. **Phase 3 (Final Draft)**: Voice-matched captain's log with proper vessel style
+
+### The 7-Element Rubric
+1. Surplus Insight — information Casey didn't already have
+2. Causal Chain — gapless observation→action→outcome
+3. Honesty — explicit uncertainty, failure, ignorance
+4. Actionable Signal — reader changes behavior
+5. Compression — every word earns its place
+6. Human Compatibility — readable at 7am
+7. Precedent Value — generalizable to other builders
+
+### The 94% Rule
+94% of observation windows produce NO log. This is correct. Silence = healthy fleet.
+
+### Agent Learning Loop
+Published logs → pattern extraction → thinking templates → loaded by agents → better logs.
+The corpus of how agents think during their best work becomes training data for improving all agents.
+
+### Files
+- `captains_log_pipeline.py` — 3-phase pipeline (z.ai models)
+- `agent_learning.py` — pattern extraction and thinking skill generation
+- `agent_client.py` — client with health check response
+- `keeper.py` — v2 with integrated health monitor
+- `health_monitor.py` — standalone fleet health monitor

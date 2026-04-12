@@ -2,30 +2,84 @@
   "vessels": {
     "SuperInstance/babel-vessel": {
       "repo": "SuperInstance/babel-vessel",
-      "status": "idle",
-      "age": 580,
-      "missed": 1,
-      "last_checked": "2026-04-12T17:26:13.089993+00:00",
-      "last_active": null,
+      "status": "active",
+      "age": 185,
+      "missed": 0,
+      "last_checked": "2026-04-12T17:35:24.506440+00:00",
+      "last_active": "2026-04-12T17:35:24.506456+00:00",
       "intervention": null
     },
     "SuperInstance/claude-code-vessel": {
       "repo": "SuperInstance/claude-code-vessel",
-      "status": "idle",
-      "age": 578,
-      "missed": 1,
-      "last_checked": "2026-04-12T17:26:13.330370+00:00",
-      "last_active": null,
+      "status": "active",
+      "age": 184,
+      "missed": 0,
+      "last_checked": "2026-04-12T17:35:24.819235+00:00",
+      "last_active": "2026-04-12T17:35:24.819251+00:00",
       "intervention": null
     },
     "flux-test-agent-001": {
       "repo": "flux-test-agent-001",
       "status": "unknown",
       "age": null,
-      "missed": 1,
-      "last_checked": "2026-04-12T17:26:13.570410+00:00",
+      "missed": 4,
+      "last_checked": "2026-04-12T17:35:25.015985+00:00",
       "last_active": null,
-      "intervention": null
+      "intervention": "alert"
+    },
+    "flux-keeper-test": {
+      "repo": "flux-keeper-test",
+      "status": "unknown",
+      "age": null,
+      "missed": 4,
+      "last_checked": "2026-04-12T17:36:25.420277+00:00",
+      "last_active": null,
+      "intervention": "alert"
+    },
+    "flux-c8ecd3": {
+      "repo": "flux-c8ecd3",
+      "status": "unknown",
+      "age": null,
+      "missed": 4,
+      "last_checked": "2026-04-12T17:36:25.792455+00:00",
+      "last_active": null,
+      "intervention": "alert"
+    },
+    "flux-test-keeper-boot": {
+      "repo": "flux-test-keeper-boot",
+      "status": "unknown",
+      "age": null,
+      "missed": 4,
+      "last_checked": "2026-04-12T17:36:26.158727+00:00",
+      "last_active": null,
+      "intervention": "alert"
+    },
+    "flux-via-keeper": {
+      "repo": "flux-via-keeper",
+      "status": "unknown",
+      "age": null,
+      "missed": 4,
+      "last_checked": "2026-04-12T17:37:26.565982+00:00",
+      "last_active": null,
+      "intervention": "alert"
+    },
+    "test-direct": {
+      "repo": "test-direct",
+      "status": "unknown",
+      "age": null,
+      "missed": 4,
+      "last_checked": "2026-04-12T17:37:26.935959+00:00",
+      "last_active": null,
+      "intervention": "alert"
+    },
+    "debug-test": {
+      "repo": "debug-test",
+      "status": "unknown",
+      "age": null,
+      "missed": 4,
+      "last_checked": "2026-04-12T17:37:27.273193+00:00",
+      "last_active": null,
+      "intervention": "alert"
     }
   },
   "last_full_scan": null
