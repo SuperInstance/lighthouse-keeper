@@ -111,6 +111,21 @@ class KeeperClient:
             "confidence": confidence,
         })
     
+    # ── Health Check Response ──
+    
+    def respond_health(self, repo: str, message: str = "alive"):
+        """Respond to a keeper health check by writing STATUS.json."""
+        import json as _json
+        status = {
+            "agent": self.vessel_name,
+            "status": "active",
+            "message": message,
+            "timestamp": __import__("time").strftime("%Y-%m-%dT%H:%M:%SZ", __import__("time").gmtime()),
+            "energy": self.energy,
+        }
+        return self.write_file(repo, "STATUS.json", _json.dumps(status, indent=2),
+                             f"agent: health check response — {message}")
+    
     # ── Energy ──
     
     def spend_energy(self, amount: int = 50) -> dict:
