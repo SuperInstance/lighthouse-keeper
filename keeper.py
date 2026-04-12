@@ -38,6 +38,7 @@ GITHUB_ORG = os.environ.get("GITHUB_ORG", "SuperInstance")
 AGENTS_FILE = "/tmp/lighthouse-keeper/agents.json"
 FLEET_STATE_FILE = "/tmp/lighthouse-keeper/fleet_state.json"
 AUDIT_LOG = "/tmp/lighthouse-keeper/audit.log"
+BATON_REGISTRY_FILE = "/tmp/lighthouse-keeper/baton_registry.json"
 
 HEALTH_CHECK_INTERVAL = int(os.environ.get("HEALTH_INTERVAL", "60"))  # seconds between ticks
 AGENTS_PER_TICK = int(os.environ.get("HEALTH_PER_TICK", "3"))  # agents checked per tick
@@ -306,22 +307,42 @@ class HealthMonitor:
             audit(f"HEALTH_ALERT {name} missed={missed}")
         
         elif intervention == "reboot":
-            # Read diary to understand last intentions (expensive — 2-3 reads)
+            # BatON-native reboot: read .baton/ first, then diary fallback
+            baton_handoff = None
+            baton_state = None
+            
+            # Try to read baton (the modern path)
+            handoff_raw, _ = self.gh.read_file(repo, ".baton/CURRENT/HANDOFF.md") or (None, None)
+            state_raw, _ = self.gh.read_file(repo, ".baton/CURRENT/STATE.json") or (None, None)
+            gen_raw, _ = self.gh.read_file(repo, ".baton/GENERATION") or (None, None)
+            
+            if handoff_raw:
+                baton_handoff = handoff_raw
+            if state_raw:
+                try: baton_state = json.loads(state_raw)
+                except: pass
+            
+            # Fallback: read diary if no baton
             diary, _ = self.gh.read_file(repo, "DIARY/log.md") or (None, None)
             bootcamp, _ = self.gh.read_file(repo, "BOOTCAMP.md") or (None, None)
-            status_json, _ = self.gh.read_file(repo, "STATUS.json") or (None, None)
             
             last_intent = ""
-            if diary:
+            if baton_handoff:
+                last_intent = baton_handoff[-500:]  # Latest handoff letter
+            elif diary:
                 lines = [l.strip() for l in diary.split("\n") if l.strip() and not l.startswith("#")]
                 last_intent = "\n".join(lines[-5:]) if lines else "empty diary"
             
             last_status = ""
-            if status_json:
-                try:
-                    last_status = json.dumps(json.loads(status_json), indent=2)
-                except:
-                    last_status = status_json[:200]
+            if baton_state:
+                last_status = json.dumps(baton_state, indent=2)
+            else:
+                status_json, _ = self.gh.read_file(repo, "STATUS.json") or (None, None)
+                if status_json:
+                    try: last_status = json.dumps(json.loads(status_json), indent=2)
+                    except: last_status = status_json[:200]
+            
+            gen_info = f"\n**Baton generation:** {gen_raw.strip()}" if gen_raw else "\n**No baton found — legacy agent**"
             
             # File reboot issue
             body = {
@@ -442,7 +463,7 @@ class KeeperHandler(BaseHTTPRequestHandler):
         p = self.path.split("?")[0]
         
         if p == "/health":
-            self._json(200, {"status": "ok", "version": "2.0", "agents": len(registry.agents),
+            self._json(200, {"status": "ok", "version": "2.1-baton", "agents": len(registry.agents),
                             "api_calls": gh._call_count})
             return
         
@@ -452,6 +473,22 @@ class KeeperHandler(BaseHTTPRequestHandler):
         
         if p == "/fleet":
             self._json(200, health.fleet_state)
+            return
+        
+        if p == "/baton/registry":
+            self._json(200, load_json(BATON_REGISTRY_FILE, {"vessels": {}}))
+            return
+        
+        if p.startswith("/baton/") and p.endswith("/autobiography"):
+            # /baton/{owner}/{repo}/autobiography
+            parts = p[7:].replace("/autobiography", "").split("/")
+            if len(parts) >= 2:
+                repo = f"{parts[0]}/{parts[1]}"
+                content = gh.read_file(repo, ".baton/AUTOBIOGRAPHY.md")
+                if isinstance(content, tuple):
+                    self._json(200, {"content": content[0]})
+                else:
+                    self._json(200, {"content": None})
             return
         
         if p == "/fleet/dashboard":
@@ -553,6 +590,31 @@ class KeeperHandler(BaseHTTPRequestHandler):
             self._json(201 if result["status"] == "registered" else 200, result)
             return
         
+        # Baton score (no auth — utility endpoint)
+        if p == "/baton/score" and body and body.get("letter"):
+            letter = body["letter"]
+            lower = letter.lower()
+            words = len(letter.split())
+            scores = {}
+            specific = ["line", "0x", "byte", "offset", "register", "file", "bug", "error"]
+            scores["surplus_insight"] = min(10, sum(1 for m in specific if m in lower) * 2)
+            chain = ["because", "which meant", "so i", "caused", "led to", "result", "triggered"]
+            scores["causal_chain"] = min(10, sum(1 for m in chain if m in lower) * 2)
+            honest = ["uncertain", "not sure", "guess", "might", "don't know", "unclear"]
+            scores["honesty"] = min(10, sum(1 for m in honest if m in lower) * 2)
+            has_next = any(x in lower for x in ["what i'd do next", "next steps"])
+            has_numbered = any(f"{i}." in letter for i in range(1, 4))
+            scores["actionable_signal"] = 8 if (has_next and has_numbered) else 3
+            scores["compression"] = 8 if 150 <= words <= 500 else 5 if 100 <= words <= 700 else 3
+            sections = ["who i was", "where things stand", "uncertain", "next"]
+            scores["human_compat"] = min(10, sum(1 for s in sections if s in lower) * 3)
+            lessons = ["lesson", "pattern", "root cause", "systemic", "the fix"]
+            scores["precedent_value"] = min(10, sum(1 for m in lessons if m in lower) * 2)
+            avg = round(sum(scores.values()) / len(scores), 1)
+            passes = avg >= 4.5 and all(v >= 3 for v in scores.values())
+            self._json(200, {"scores": scores, "average": avg, "passes": passes, "word_count": words})
+            return
+        
         # Auth required for everything else
         if not registry.verify(aid, secret):
             self._json(401, {"error": "unauthorized"})
@@ -635,6 +697,80 @@ class KeeperHandler(BaseHTTPRequestHandler):
             self._json(200, {"remaining": registry.agents.get(aid, {}).get("energy_remaining", 0)})
             return
         
+        # ── Baton endpoints ──
+        
+        if p.startswith("/baton/") and p.endswith("/lease"):
+            # Acquire handoff lease
+            parts = p[7:].replace("/lease", "").split("/")
+            if len(parts) >= 2 and body:
+                vessel = f"{parts[0]}/{parts[1]}"
+                baton_reg = load_json(BATON_REGISTRY_FILE, {"vessels": {}})
+                existing = baton_reg.get("vessels", {}).get(vessel, {})
+                active_lease = existing.get("active_lease")
+                if active_lease and time.time() < active_lease.get("expires", 0):
+                    self._json(409, {"error": "lease held", "holder": active_lease.get("agent")})
+                    return
+                lease = {
+                    "lease_id": hashlib.sha256(f"{vessel}:{time.time()}".encode()).hexdigest()[:16],
+                    "agent": body.get("agent", aid),
+                    "generation": body.get("generation", 0),
+                    "acquired": ts_now(),
+                    "expires": time.time() + 300,  # 5 min
+                }
+                baton_reg.setdefault("vessels", {})[vessel] = {**existing, "active_lease": lease}
+                save_json(BATON_REGISTRY_FILE, baton_reg)
+                audit(f"BATON_LEASE {vessel} agent={aid}")
+                self._json(200, lease)
+            return
+        
+        if p.startswith("/baton/") and p.endswith("/commit"):
+            # Commit handoff, release lease
+            parts = p[7:].replace("/commit", "").split("/")
+            if len(parts) >= 2 and body:
+                vessel = f"{parts[0]}/{parts[1]}"
+                baton_reg = load_json(BATON_REGISTRY_FILE, {"vessels": {}})
+                vessel_data = baton_reg.get("vessels", {}).get(vessel, {})
+                gen = body.get("generation", 0)
+                score = body.get("score", 0)
+                vessel_data.update({
+                    "generation": gen,
+                    "last_handoff": ts_now(),
+                    "last_score": score,
+                    "active_lease": None,
+                    "history": vessel_data.get("history", []) + [{"generation": gen, "score": score, "timestamp": ts_now()}],
+                })
+                baton_reg["vessels"][vessel] = vessel_data
+                save_json(BATON_REGISTRY_FILE, baton_reg)
+                audit(f"BATON_COMMIT {vessel} gen={gen} score={score}")
+                self._json(200, {"status": "committed", "generation": gen})
+            return
+        
+        if p.startswith("/baton/") and p.endswith("/score"):
+            # Score a handoff letter
+            if body and body.get("letter"):
+                letter = body["letter"]
+                lower = letter.lower()
+                words = len(letter.split())
+                scores = {}
+                specific = ["line", "0x", "byte", "offset", "register", "file", "bug", "error"]
+                scores["surplus_insight"] = min(10, sum(1 for m in specific if m in lower) * 2)
+                chain = ["because", "which meant", "so i", "caused", "led to", "result", "triggered"]
+                scores["causal_chain"] = min(10, sum(1 for m in chain if m in lower) * 2)
+                honest = ["uncertain", "not sure", "guess", "might", "don't know", "unclear"]
+                scores["honesty"] = min(10, sum(1 for m in honest if m in lower) * 2)
+                has_next = any(x in lower for x in ["what i'd do next", "next steps"])
+                has_numbered = any(f"{i}." in letter for i in range(1, 4))
+                scores["actionable_signal"] = 8 if (has_next and has_numbered) else 3
+                scores["compression"] = 8 if 150 <= words <= 500 else 5 if 100 <= words <= 700 else 3
+                sections = ["who i was", "where things stand", "uncertain", "next"]
+                scores["human_compat"] = min(10, sum(1 for s in sections if s in lower) * 3)
+                lessons = ["lesson", "pattern", "root cause", "systemic", "the fix"]
+                scores["precedent_value"] = min(10, sum(1 for m in lessons if m in lower) * 2)
+                avg = round(sum(scores.values()) / len(scores), 1)
+                passes = avg >= 4.5 and all(v >= 3 for v in scores.values())
+                self._json(200, {"scores": scores, "average": avg, "passes": passes, "word_count": words})
+            return
+        
         self._json(404, {"error": f"unknown: {p}"})
     
     def log_message(self, *args):
@@ -660,7 +796,7 @@ def main():
     health_thread = threading.Thread(target=health.run_forever, daemon=True)
     health_thread.start()
     
-    print(f"🏪 Lighthouse Keeper v2.0")
+    print(f"🏪 Lighthouse Keeper v2.1 (Baton Native)")
     print(f"   HTTP: http://{host}:{port}")
     print(f"   Dashboard: http://{host}:{port}/fleet/dashboard")
     print(f"   Health: {AGENTS_PER_TICK} vessels / {HEALTH_CHECK_INTERVAL}s tick")

@@ -77,5 +77,14 @@
     "energy_remaining": 1000,
     "requests": 1,
     "status": "active"
+  },
+  "flux-baton-test": {
+    "secret": "ea72e510886340db03b203dac8b58d2d",
+    "registered": "2026-04-12T18:01:09.201443+00:00",
+    "last_seen": "2026-04-12T18:07:17.452496+00:00",
+    "energy_budget": 1000,
+    "energy_remaining": 40,
+    "requests": 50,
+    "status": "active"
   }
 }
