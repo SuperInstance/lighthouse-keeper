@@ -958,3 +958,6 @@
 [2026-04-12 23:02:08] REBOOT_REQUIRED flux-chronometer missed=60 last_intent=
 [2026-04-12 23:02:10] REBOOT_REQUIRED babel-vessel missed=76 last_intent=
 [2026-04-12 23:02:12] REBOOT_REQUIRED claude-code-vessel missed=76 last_intent=
+[2026-04-13 05:12:30] REBOOT_REQUIRED flux-chronometer missed=146 last_intent=
+[2026-04-13 05:12:32] REBOOT_REQUIRED babel-vessel missed=162 last_intent=
+[2026-04-13 05:12:34] REBOOT_REQUIRED claude-code-vessel missed=162 last_intent=

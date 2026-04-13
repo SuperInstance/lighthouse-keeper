@@ -475,6 +475,18 @@ class KeeperHandler(BaseHTTPRequestHandler):
             self._json(200, health.fleet_state)
             return
         
+        # Tender endpoints — liaison vessel tracking
+        if p == "/tender/status":
+            tender_state = load_json("/tmp/lighthouse-keeper/tender_state.json", {"messages": [], "stats": {}})
+            self._json(200, tender_state)
+            return
+        
+        if p == "/tender/pending":
+            tender_state = load_json("/tmp/lighthouse-keeper/tender_state.json", {"messages": []})
+            pending = [m for m in tender_state.get("messages", []) if m.get("status") == "pending"]
+            self._json(200, {"pending": pending, "count": len(pending)})
+            return
+        
         if p == "/baton/registry":
             self._json(200, load_json(BATON_REGISTRY_FILE, {"vessels": {}}))
             return
