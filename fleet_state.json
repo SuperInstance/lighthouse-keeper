@@ -3,27 +3,27 @@
     "SuperInstance/babel-vessel": {
       "repo": "SuperInstance/babel-vessel",
       "status": "stale",
-      "age": 4912,
-      "missed": 18,
-      "last_checked": "2026-04-13T18:38:28.031419+00:00",
+      "age": 7240,
+      "missed": 27,
+      "last_checked": "2026-04-13T19:17:16.314496+00:00",
       "last_active": "2026-04-13T17:21:16.513726+00:00",
       "intervention": "reboot"
     },
     "SuperInstance/claude-code-vessel": {
       "repo": "SuperInstance/claude-code-vessel",
-      "status": "stale",
-      "age": 4869,
-      "missed": 18,
-      "last_checked": "2026-04-13T18:38:30.152336+00:00",
-      "last_active": "2026-04-13T17:21:16.939206+00:00",
-      "intervention": "reboot"
+      "status": "idle",
+      "age": 486,
+      "missed": 1,
+      "last_checked": "2026-04-13T19:17:18.641025+00:00",
+      "last_active": "2026-04-13T19:13:01.748274+00:00",
+      "intervention": null
     },
     "flux-test-agent-001": {
       "repo": "flux-test-agent-001",
       "status": "unknown",
       "age": null,
-      "missed": 360,
-      "last_checked": "2026-04-13T18:39:32.331220+00:00",
+      "missed": 369,
+      "last_checked": "2026-04-13T19:18:19.058244+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -31,8 +31,8 @@
       "repo": "flux-keeper-test",
       "status": "unknown",
       "age": null,
-      "missed": 355,
-      "last_checked": "2026-04-13T18:39:33.738800+00:00",
+      "missed": 364,
+      "last_checked": "2026-04-13T19:18:20.430980+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -40,8 +40,8 @@
       "repo": "flux-c8ecd3",
       "status": "unknown",
       "age": null,
-      "missed": 355,
-      "last_checked": "2026-04-13T18:39:35.267230+00:00",
+      "missed": 364,
+      "last_checked": "2026-04-13T19:18:21.768223+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -49,8 +49,8 @@
       "repo": "flux-test-keeper-boot",
       "status": "unknown",
       "age": null,
-      "missed": 355,
-      "last_checked": "2026-04-13T18:40:36.683438+00:00",
+      "missed": 363,
+      "last_checked": "2026-04-13T19:15:06.353568+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -58,8 +58,8 @@
       "repo": "flux-via-keeper",
       "status": "unknown",
       "age": null,
-      "missed": 355,
-      "last_checked": "2026-04-13T18:40:38.114197+00:00",
+      "missed": 363,
+      "last_checked": "2026-04-13T19:15:07.866214+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -67,8 +67,8 @@
       "repo": "test-direct",
       "status": "unknown",
       "age": null,
-      "missed": 355,
-      "last_checked": "2026-04-13T18:40:39.637670+00:00",
+      "missed": 363,
+      "last_checked": "2026-04-13T19:15:09.247166+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -76,8 +76,8 @@
       "repo": "debug-test",
       "status": "unknown",
       "age": null,
-      "missed": 355,
-      "last_checked": "2026-04-13T18:41:41.008799+00:00",
+      "missed": 363,
+      "last_checked": "2026-04-13T19:16:10.718710+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -85,8 +85,8 @@
       "repo": "flux-challenge-6068",
       "status": "unknown",
       "age": null,
-      "missed": 348,
-      "last_checked": "2026-04-13T18:41:42.409026+00:00",
+      "missed": 356,
+      "last_checked": "2026-04-13T19:16:12.156709+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -94,8 +94,8 @@
       "repo": "flux-baton-test",
       "status": "unknown",
       "age": null,
-      "missed": 345,
-      "last_checked": "2026-04-13T18:41:43.832584+00:00",
+      "missed": 353,
+      "last_checked": "2026-04-13T19:16:13.473140+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -103,8 +103,8 @@
       "repo": "flux-chronometer",
       "status": "unknown",
       "age": null,
-      "missed": 333,
-      "last_checked": "2026-04-13T18:38:26.616441+00:00",
+      "missed": 342,
+      "last_checked": "2026-04-13T19:17:14.935452+00:00",
       "last_active": null,
       "intervention": "reboot"
     }

@@ -42,20 +42,30 @@ AUDIT_LOG = "/tmp/lighthouse-keeper/audit.log"
 # ── Rate Limiter ──
 class RateLimiter:
     """Token bucket rate limiter per agent."""
-    def __init__(self):
-        self.buckets = {}  # agent_id -> {tokens, last_refill, max_tokens, refill_rate}
+    def __init__(self) -> None:
+        self.buckets: Dict[str, Dict[str, Any]] = {}  # agent_id -> {tokens, last_refill, max_tokens, refill_rate}
     
-    def configure(self, agent_id, max_tokens=100, refill_rate=10):
+    def configure(self, agent_id: str, max_tokens: int = 100, refill_rate: float = 10) -> None:
         """Configure rate limit for an agent. refill_rate = tokens/minute."""
+        if not agent_id:
+            return
+        if max_tokens <= 0:
+            raise ValueError("max_tokens must be positive")
+        if refill_rate <= 0:
+            raise ValueError("refill_rate must be positive")
         self.buckets[agent_id] = {
-            "tokens": max_tokens,
+            "tokens": float(max_tokens),
             "last_refill": time.time(),
-            "max_tokens": max_tokens,
-            "refill_rate": refill_rate  # tokens per minute
+            "max_tokens": float(max_tokens),
+            "refill_rate": float(refill_rate)  # tokens per minute
         }
     
-    def consume(self, agent_id, tokens=1):
+    def consume(self, agent_id: str, tokens: int = 1) -> bool:
         """Try to consume tokens. Returns True if allowed."""
+        if not agent_id:
+            return False
+        if tokens <= 0:
+            return True  # No cost for zero or negative tokens
         if agent_id not in self.buckets:
             self.configure(agent_id)
         
@@ -72,9 +82,14 @@ class RateLimiter:
 
 rate_limiter = RateLimiter()
 
-def log_audit(msg):
-    with open(AUDIT_LOG, "a") as f:
-        f.write(f"{ts_now()} {msg}\n")
+def log_audit(msg: str) -> None:
+    """Write audit log entry with error handling."""
+    try:
+        with open(AUDIT_LOG, "a") as f:
+            f.write(f"{ts_now()} {msg}\n")
+    except (IOError, OSError) as e:
+        print(f"ERROR writing audit log: {e}")
+
 
 
 BATON_REGISTRY_FILE = "/tmp/lighthouse-keeper/baton_registry.json"
@@ -95,16 +110,24 @@ def audit(msg: str):
 def ts_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-def load_json(path: str, default=None):
+def load_json(path: str, default: Optional[Any] = None) -> Optional[Any]:
+    """Load JSON from file with error handling."""
     try:
-        with open(path) as f:
+        with open(path, "r") as f:
             return json.load(f)
-    except:
+    except FileNotFoundError:
+        return default if default is not None else {}
+    except (json.JSONDecodeError, IOError, OSError) as e:
+        audit(f"ERROR loading JSON from {path}: {e}")
         return default if default is not None else {}
 
-def save_json(path: str, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2, default=str)
+def save_json(path: str, data: Any) -> None:
+    """Save data to JSON file with error handling."""
+    try:
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2, default=str)
+    except (TypeError, IOError, OSError) as e:
+        audit(f"ERROR saving JSON to {path}: {e}")
 
 # ── GitHub API ──
 
@@ -147,16 +170,22 @@ class GitHub:
     def put(self, path: str, body: dict) -> dict:
         return self._req("PUT", path, body)
     
-    def read_file(self, repo: str, path: str) -> Optional[str]:
-        """Read a file from a repo. Returns decoded string or None."""
-        data = self.get(f"/repos/{repo}/contents/{path}")
-        if "_error" in data:
+    def read_file(self, repo: str, path: str) -> Optional[tuple[str, Optional[str]]]:
+        """Read a file from a repo. Returns (content, sha) or None."""
+        try:
+            data = self.get(f"/repos/{repo}/contents/{path}")
+            if "_error" in data:
+                return None
+            if "content" in data:
+                content = base64.b64decode(data["content"]).decode()
+                sha = data.get("sha")
+                return content, sha
+            return None, None
+        except (ValueError, KeyError, TypeError) as e:
+            audit(f"ERROR reading file {repo}/{path}: {e}")
             return None
-        if "content" in data:
-            return base64.b64decode(data["content"]).decode(), data.get("sha")
-        return None, None
     
-    def write_file(self, repo: str, path: str, content: str, message: str, sha=None) -> dict:
+    def write_file(self, repo: str, path: str, content: str, message: str, sha: Optional[str] = None) -> dict:
         encoded = base64.b64encode(content.encode()).decode()
         body = {"message": message, "content": encoded}
         if sha:
@@ -183,11 +212,8 @@ class GitHub:
                 if "-vessel" in name or name.startswith("flux-agent") or name.startswith("flux-"):
                     vessels.append(r["full_name"])
         return vessels
-
-
-# ── Agent Registry ──
-
-    def _raw_request(self, method, path, data=None):
+    
+    def _raw_request(self, method: str, path: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Raw GitHub API request — for proxy use."""
         url = f"https://api.github.com{path}"
         headers = {
@@ -205,6 +231,9 @@ class GitHub:
         except Exception as e:
             return {"error": str(e)}
 
+
+# ── Agent Registry ──
+
 class AgentRegistry:
     """Registered agents with credentials and energy budgets."""
     
@@ -212,54 +241,87 @@ class AgentRegistry:
         self.agents = load_json(AGENTS_FILE, {})
         self._lock = threading.Lock()
     
-    def _save(self):
+    def _save(self) -> None:
         save_json(AGENTS_FILE, self.agents)
     
     def register(self, vessel: str) -> dict:
+        """Register a new agent vessel. Returns registration info."""
+        if not vessel or not isinstance(vessel, str):
+            return {"error": "vessel must be a non-empty string", "status": "error"}
+        
         with self._lock:
             if vessel in self.agents:
                 return {"agent_id": vessel, "secret": self.agents[vessel]["secret"],
                         "status": "already_registered"}
-            secret = hashlib.sha256(f"{vessel}:{time.time()}:{os.urandom(8).hex()}".encode()).hexdigest()[:32]
-            self.agents[vessel] = {
-                "secret": secret,
-                "registered": ts_now(),
-                "last_seen": ts_now(),
-                "energy_budget": ENERGY_DEFAULT,
-                "energy_remaining": ENERGY_DEFAULT,
-                "requests": 0,
-                "status": "active",
-            }
-            self._save()
-            return {"agent_id": vessel, "secret": secret, "status": "registered"}
+            
+            try:
+                secret = hashlib.sha256(f"{vessel}:{time.time()}:{os.urandom(8).hex()}".encode()).hexdigest()[:32]
+                self.agents[vessel] = {
+                    "secret": secret,
+                    "registered": ts_now(),
+                    "last_seen": ts_now(),
+                    "energy_budget": ENERGY_DEFAULT,
+                    "energy_remaining": ENERGY_DEFAULT,
+                    "requests": 0,
+                    "status": "active",
+                }
+                self._save()
+                return {"agent_id": vessel, "secret": secret, "status": "registered"}
+            except Exception as e:
+                audit(f"ERROR registering vessel {vessel}: {e}")
+                return {"error": str(e), "status": "error"}
     
     def verify(self, vessel: str, secret: str) -> bool:
+        """Verify agent credentials. Returns True if valid."""
+        if not vessel or not secret:
+            return False
         agent = self.agents.get(vessel)
         return agent and agent["secret"] == secret
     
-    def touch(self, vessel: str):
+    def touch(self, vessel: str) -> None:
+        """Update agent last_seen timestamp and request count."""
+        if not vessel:
+            return
         with self._lock:
             if vessel in self.agents:
-                self.agents[vessel]["last_seen"] = ts_now()
-                self.agents[vessel]["requests"] += 1
-                self._save()
+                try:
+                    self.agents[vessel]["last_seen"] = ts_now()
+                    self.agents[vessel]["requests"] += 1
+                    self._save()
+                except (KeyError, TypeError) as e:
+                    audit(f"ERROR touching vessel {vessel}: {e}")
     
     def spend_energy(self, vessel: str, amount: int) -> bool:
+        """Spend energy from agent budget. Returns True if successful."""
+        if not vessel or amount <= 0:
+            return False
         with self._lock:
             agent = self.agents.get(vessel)
-            if not agent or agent["energy_remaining"] < amount:
+            if not agent:
                 return False
-            agent["energy_remaining"] -= amount
-            self._save()
-            return True
+            try:
+                if agent["energy_remaining"] < amount:
+                    return False
+                agent["energy_remaining"] -= amount
+                self._save()
+                return True
+            except (KeyError, TypeError) as e:
+                audit(f"ERROR spending energy for vessel {vessel}: {e}")
+                return False
     
-    def regenerate(self, vessel: str, amount: int = 100):
+    def regenerate(self, vessel: str, amount: int = 100) -> None:
+        """Regenerate energy for an agent."""
+        if not vessel or amount <= 0:
+            return
         with self._lock:
             agent = self.agents.get(vessel)
             if agent:
-                agent["energy_remaining"] = min(
-                    agent["energy_budget"], agent["energy_remaining"] + amount)
-                self._save()
+                try:
+                    agent["energy_remaining"] = min(
+                        agent["energy_budget"], agent["energy_remaining"] + amount)
+                    self._save()
+                except (KeyError, TypeError) as e:
+                    audit(f"ERROR regenerating energy for vessel {vessel}: {e}")
     
     def list_agents(self) -> list:
         return [{"vessel": k, "last_seen": v["last_seen"],
@@ -277,7 +339,7 @@ class HealthMonitor:
     Only does expensive operations (file reads) when intervention is needed.
     """
     
-    def __init__(self, github: GitHub, registry: AgentRegistry):
+    def __init__(self, github: GitHub, registry: AgentRegistry) -> None:
         self.gh = github
         self.registry = registry
         self.fleet_state = load_json(FLEET_STATE_FILE, {"vessels": {}, "last_full_scan": None})
@@ -293,7 +355,7 @@ class HealthMonitor:
         all_vessels = list(dict.fromkeys(known + registered))
         return all_vessels
     
-    def check_one(self, repo: str) -> dict:
+    def check_one(self, repo: str) -> Dict[str, Any]:
         """Check a single vessel's health. Cheap: 1 API call (commits)."""
         age = self.gh.last_commit_age(repo)
         
@@ -344,7 +406,7 @@ class HealthMonitor:
         
         return state
     
-    def intervene(self, repo: str, state: dict):
+    def intervene(self, repo: str, state: Dict[str, Any]) -> None:
         """Intervene with an unresponsive agent. Expensive: reads diary."""
         name = repo.split("/")[-1]
         missed = state["missed"]
@@ -431,7 +493,7 @@ class HealthMonitor:
             
             audit(f"REBOOT_REQUIRED {name} missed={missed} last_intent={last_intent[:80]}")
     
-    def tick(self):
+    def tick(self) -> List[Dict[str, Any]]:
         """Run one incremental health check tick."""
         vessels = self._vessel_list()
         if not vessels:
@@ -453,7 +515,7 @@ class HealthMonitor:
         
         return checked
     
-    def run_forever(self):
+    def run_forever(self) -> None:
         """Background health monitoring loop."""
         self._running = True
         while self._running:
@@ -478,7 +540,7 @@ class HealthMonitor:
             
             time.sleep(HEALTH_CHECK_INTERVAL)
     
-    def stop(self):
+    def stop(self) -> None:
         self._running = False
 
 
@@ -490,33 +552,36 @@ health = HealthMonitor(gh, registry)
 
 class KeeperHandler(BaseHTTPRequestHandler):
     
-    def _parse(self) -> tuple:
+    def _parse(self) -> tuple[str, str, Optional[Dict[str, Any]]]:
         agent_id = self.headers.get("X-Agent-ID", "")
         secret = self.headers.get("X-Agent-Secret", "")
-        length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(length)) if length else None
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else None
+        except (ValueError, json.JSONDecodeError):
+            body = None
         return agent_id, secret, body
     
-    def _json(self, code: int, data):
+    def _json(self, code: int, data: Any) -> None:
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(json.dumps(data, indent=2, default=str).encode())
     
-    def _auth(self) -> tuple:
+    def _auth(self) -> tuple[str, str, Optional[Dict[str, Any]], bool]:
         aid, secret, body = self._parse()
         if not aid or not secret or not registry.verify(aid, secret):
             return aid, secret, body, False
         registry.touch(aid)
         return aid, secret, body, True
     
-    def do_OPTIONS(self):
+    def do_OPTIONS(self) -> None:
         self._json(200, {"ok": True})
     
     # ── GET ──
     
-    def do_GET(self):
+    def do_GET(self) -> None:
         p = self.path.split("?")[0]
         
         if p == "/health":
@@ -645,7 +710,7 @@ class KeeperHandler(BaseHTTPRequestHandler):
     
     # ── POST ──
     
-    def do_POST(self):
+    def do_POST(self) -> None:
         p = self.path
         aid, secret, body = self._parse()
         
@@ -690,6 +755,93 @@ class KeeperHandler(BaseHTTPRequestHandler):
             return
         registry.touch(aid)
         
+        # ── Proxy endpoints ──
+        
+        if p.startswith("/proxy/github"):
+            # Proxy GitHub API calls - agents never see tokens
+            if not body or "path" not in body:
+                self._json(400, {"error": "need 'path' in request body"})
+                return
+            if "method" not in body or body["method"] not in ["GET", "POST", "PUT", "DELETE", "PATCH"]:
+                self._json(400, {"error": "need valid 'method' (GET, POST, PUT, DELETE, PATCH)"})
+                return
+            
+            method = body["method"]
+            path = body["path"]
+            data = body.get("data")
+            
+            # Rate limit check
+            if not rate_limiter.consume(aid, tokens=1):
+                self._json(429, {"error": "rate limit exceeded"})
+                return
+            
+            log_audit(f"PROXY_GITHUB agent={aid} method={method} path={path}")
+            result = gh._raw_request(method, path, data)
+            
+            # Log errors from GitHub
+            if "error" in result:
+                log_audit(f"PROXY_GITHUB_ERROR agent={aid} method={method} path={path} error={result['error']}")
+            
+            self._json(200 if "error" not in result else 502, result)
+            return
+        
+        if p == "/proxy/model":
+            # Proxy model API calls with token budget tracking
+            if not body or "model" not in body:
+                self._json(400, {"error": "need 'model' in request body"})
+                return
+            if "messages" not in body or not isinstance(body["messages"], list):
+                self._json(400, {"error": "need 'messages' array in request body"})
+                return
+            
+            model = body["model"]
+            messages = body["messages"]
+            temperature = body.get("temperature", 0.7)
+            max_tokens = body.get("max_tokens", 1000)
+            
+            # Validate inputs
+            if not isinstance(model, str) or not model:
+                self._json(400, {"error": "'model' must be a non-empty string"})
+                return
+            if not isinstance(temperature, (int, float)) or temperature < 0 or temperature > 2:
+                self._json(400, {"error": "'temperature' must be a number between 0 and 2"})
+                return
+            if not isinstance(max_tokens, int) or max_tokens <= 0:
+                self._json(400, {"error": "'max_tokens' must be a positive integer"})
+                return
+            for i, msg in enumerate(messages):
+                if not isinstance(msg, dict) or "role" not in msg or "content" not in msg:
+                    self._json(400, {"error": f"message[{i}] must have 'role' and 'content' fields"})
+                    return
+            
+            # Energy cost based on max_tokens
+            energy_cost = max_tokens // 10
+            if not registry.spend_energy(aid, energy_cost):
+                self._json(403, {"error": "insufficient energy", "required": energy_cost})
+                return
+            
+            log_audit(f"PROXY_MODEL agent={aid} model={model} tokens={max_tokens}")
+            
+            # Mock response for now - in production, this would call the actual model API
+            result = {
+                "model": model,
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": f"[PROXY: Model call for {model} with {len(messages)} messages]"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": sum(len(msg.get("content", "")) // 4 for msg in messages),
+                    "completion_tokens": max_tokens,
+                    "total_tokens": max_tokens + sum(len(msg.get("content", "")) // 4 for msg in messages)
+                }
+            }
+            
+            self._json(200, result)
+            return
+
         if p.startswith("/file/") and body:
             parts = p[6:].split("/", 2)
             if len(parts) >= 3:
@@ -842,13 +994,13 @@ class KeeperHandler(BaseHTTPRequestHandler):
         
         self._json(404, {"error": f"unknown: {p}"})
     
-    def log_message(self, *args):
+    def log_message(self, *args: Any) -> None:
         pass
 
 
 # ── Main ──
 
-def main():
+def main() -> None:
     port = KEEPER_PORT
     host = KEEPER_HOST
     if "--docker" in sys.argv:
