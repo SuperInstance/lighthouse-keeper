@@ -38,6 +38,45 @@ GITHUB_ORG = os.environ.get("GITHUB_ORG", "SuperInstance")
 AGENTS_FILE = "/tmp/lighthouse-keeper/agents.json"
 FLEET_STATE_FILE = "/tmp/lighthouse-keeper/fleet_state.json"
 AUDIT_LOG = "/tmp/lighthouse-keeper/audit.log"
+
+# ── Rate Limiter ──
+class RateLimiter:
+    """Token bucket rate limiter per agent."""
+    def __init__(self):
+        self.buckets = {}  # agent_id -> {tokens, last_refill, max_tokens, refill_rate}
+    
+    def configure(self, agent_id, max_tokens=100, refill_rate=10):
+        """Configure rate limit for an agent. refill_rate = tokens/minute."""
+        self.buckets[agent_id] = {
+            "tokens": max_tokens,
+            "last_refill": time.time(),
+            "max_tokens": max_tokens,
+            "refill_rate": refill_rate  # tokens per minute
+        }
+    
+    def consume(self, agent_id, tokens=1):
+        """Try to consume tokens. Returns True if allowed."""
+        if agent_id not in self.buckets:
+            self.configure(agent_id)
+        
+        b = self.buckets[agent_id]
+        now = time.time()
+        elapsed = now - b["last_refill"]
+        b["tokens"] = min(b["max_tokens"], b["tokens"] + (elapsed / 60.0) * b["refill_rate"])
+        b["last_refill"] = now
+        
+        if b["tokens"] >= tokens:
+            b["tokens"] -= tokens
+            return True
+        return False
+
+rate_limiter = RateLimiter()
+
+def log_audit(msg):
+    with open(AUDIT_LOG, "a") as f:
+        f.write(f"{ts_now()} {msg}\n")
+
+
 BATON_REGISTRY_FILE = "/tmp/lighthouse-keeper/baton_registry.json"
 
 HEALTH_CHECK_INTERVAL = int(os.environ.get("HEALTH_INTERVAL", "60"))  # seconds between ticks
@@ -147,6 +186,24 @@ class GitHub:
 
 
 # ── Agent Registry ──
+
+    def _raw_request(self, method, path, data=None):
+        """Raw GitHub API request — for proxy use."""
+        url = f"https://api.github.com{path}"
+        headers = {
+            "Authorization": f"token {self.token}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json"
+        }
+        body = json.dumps(data).encode() if data else None
+        req = urllib.request.Request(url, data=body, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            return {"error": e.reason, "code": e.code}
+        except Exception as e:
+            return {"error": str(e)}
 
 class AgentRegistry:
     """Registered agents with credentials and energy budgets."""
