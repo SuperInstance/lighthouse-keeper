@@ -425,8 +425,19 @@ def deliver_all_challenges(vessel: str):
 
 
 if __name__ == "__main__":
-    source ~/.bashrc
-    export GITHUB_TOKEN=$(grep GITHUB_TOKEN ~/.bashrc | head -1 | sed 's/.*=//' | tr -d "'" | tr -d '"')
+    import subprocess
+    # Load GITHUB_TOKEN from environment or bashrc
+    if not GITHUB_TOKEN:
+        try:
+            result = subprocess.run(
+                ["bash", "-c", "source ~/.bashrc 2>/dev/null && echo $GITHUB_TOKEN"],
+                capture_output=True, text=True
+            )
+            token = result.stdout.strip().strip("'\"")
+            if token:
+                os.environ["GITHUB_TOKEN"] = token
+        except Exception:
+            pass
     
     # Default: deliver to oracle1-vessel (we'll run these ourselves)
     vessel = sys.argv[1] if len(sys.argv) > 1 else "oracle1-vessel"
