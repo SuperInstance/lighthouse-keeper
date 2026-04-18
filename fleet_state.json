@@ -2,28 +2,28 @@
   "vessels": {
     "SuperInstance/babel-vessel": {
       "repo": "SuperInstance/babel-vessel",
-      "status": "stale",
-      "age": 7240,
-      "missed": 27,
-      "last_checked": "2026-04-13T19:17:16.314496+00:00",
-      "last_active": "2026-04-13T17:21:16.513726+00:00",
+      "status": "dead",
+      "age": 373123,
+      "missed": 1442,
+      "last_checked": "2026-04-18T17:51:01.591394+00:00",
+      "last_active": "2026-04-14T10:16:59.938720+00:00",
       "intervention": "reboot"
     },
     "SuperInstance/claude-code-vessel": {
       "repo": "SuperInstance/claude-code-vessel",
-      "status": "idle",
-      "age": 486,
-      "missed": 1,
-      "last_checked": "2026-04-13T19:17:18.641025+00:00",
-      "last_active": "2026-04-13T19:13:01.748274+00:00",
-      "intervention": null
+      "status": "dead",
+      "age": 410206,
+      "missed": 1586,
+      "last_checked": "2026-04-18T17:51:03.437302+00:00",
+      "last_active": "2026-04-13T23:56:55.938119+00:00",
+      "intervention": "reboot"
     },
     "flux-test-agent-001": {
       "repo": "flux-test-agent-001",
       "status": "unknown",
       "age": null,
-      "missed": 369,
-      "last_checked": "2026-04-13T19:18:19.058244+00:00",
+      "missed": 2020,
+      "last_checked": "2026-04-18T17:52:06.128448+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -31,8 +31,8 @@
       "repo": "flux-keeper-test",
       "status": "unknown",
       "age": null,
-      "missed": 364,
-      "last_checked": "2026-04-13T19:18:20.430980+00:00",
+      "missed": 2015,
+      "last_checked": "2026-04-18T17:52:07.414777+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -40,8 +40,8 @@
       "repo": "flux-c8ecd3",
       "status": "unknown",
       "age": null,
-      "missed": 364,
-      "last_checked": "2026-04-13T19:18:21.768223+00:00",
+      "missed": 2015,
+      "last_checked": "2026-04-18T17:52:08.647572+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -49,8 +49,8 @@
       "repo": "flux-test-keeper-boot",
       "status": "unknown",
       "age": null,
-      "missed": 363,
-      "last_checked": "2026-04-13T19:15:06.353568+00:00",
+      "missed": 2014,
+      "last_checked": "2026-04-18T17:48:52.516702+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -58,8 +58,8 @@
       "repo": "flux-via-keeper",
       "status": "unknown",
       "age": null,
-      "missed": 363,
-      "last_checked": "2026-04-13T19:15:07.866214+00:00",
+      "missed": 2014,
+      "last_checked": "2026-04-18T17:48:53.720228+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -67,8 +67,8 @@
       "repo": "test-direct",
       "status": "unknown",
       "age": null,
-      "missed": 363,
-      "last_checked": "2026-04-13T19:15:09.247166+00:00",
+      "missed": 2014,
+      "last_checked": "2026-04-18T17:48:54.959585+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -76,8 +76,8 @@
       "repo": "debug-test",
       "status": "unknown",
       "age": null,
-      "missed": 363,
-      "last_checked": "2026-04-13T19:16:10.718710+00:00",
+      "missed": 2014,
+      "last_checked": "2026-04-18T17:49:56.283960+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -85,8 +85,8 @@
       "repo": "flux-challenge-6068",
       "status": "unknown",
       "age": null,
-      "missed": 356,
-      "last_checked": "2026-04-13T19:16:12.156709+00:00",
+      "missed": 2007,
+      "last_checked": "2026-04-18T17:49:57.526962+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -94,8 +94,8 @@
       "repo": "flux-baton-test",
       "status": "unknown",
       "age": null,
-      "missed": 353,
-      "last_checked": "2026-04-13T19:16:13.473140+00:00",
+      "missed": 2004,
+      "last_checked": "2026-04-18T17:49:58.738898+00:00",
       "last_active": null,
       "intervention": "reboot"
     },
@@ -103,8 +103,8 @@
       "repo": "flux-chronometer",
       "status": "unknown",
       "age": null,
-      "missed": 342,
-      "last_checked": "2026-04-13T19:17:14.935452+00:00",
+      "missed": 1993,
+      "last_checked": "2026-04-18T17:51:00.155030+00:00",
       "last_active": null,
       "intervention": "reboot"
     }
